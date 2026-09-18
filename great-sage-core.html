@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<title>ANALYTICAL ENGINE // CORE</title>
+<style>
+  :root{
+    --bg:#000000;
+    --cyan:#ffffff;
+    --cyan-dim:#5a5a5a;
+    --amber:#e6e6e6;
+    --line:rgba(255,255,255,0.25);
+    --text:#d8d8d8;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;height:100%;background:var(--bg);
+    font-family:'Courier New',monospace;
+    color:var(--text);
+    overflow:hidden;
+  }
+  #wrap{
+    position:relative;width:100%;height:100%;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:
+      radial-gradient(circle at 50% 50%, rgba(255,255,255,0.05), transparent 60%),
+      repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 3px);
+  }
+  canvas{display:block;}
+  #status{
+    position:absolute;top:18px;left:18px;
+    font-size:11px;letter-spacing:2px;color:var(--cyan-dim);
+    line-height:1.6;
+  }
+  #status b{color:var(--cyan);}
+  #transcript{
+    position:absolute;bottom:90px;max-width:80%;
+    text-align:center;font-size:14px;letter-spacing:1px;
+    color:var(--cyan);min-height:20px;opacity:0.9;
+    text-shadow:0 0 8px rgba(255,255,255,0.6);
+  }
+  #controls{
+    position:absolute;bottom:24px;display:flex;gap:12px;
+  }
+  button{
+    background:transparent;
+    border:1px solid var(--cyan-dim);
+    color:var(--cyan);
+    font-family:inherit;
+    font-size:11px;
+    letter-spacing:2px;
+    padding:10px 18px;
+    cursor:pointer;
+    transition:all .2s;
+  }
+  button:hover{background:rgba(255,255,255,0.1);border-color:var(--cyan);}
+  button.active{background:rgba(255,255,255,0.15);border-color:var(--amber);color:var(--amber);}
+  #hint{
+    position:absolute;top:18px;right:18px;font-size:10px;color:var(--cyan-dim);
+    text-align:right;line-height:1.6;max-width:220px;
+  }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="status">GREAT&nbsp;SAGE&nbsp;— <b id="mode">STANDBY</b><br>AMPLITUDE&nbsp;<span id="amp">0.00</span></div>
+  <div id="hint">Nhấn MIC và nói để lõi phản ứng theo giọng.<br>Hoặc dùng DEMO nếu không có micro.</div>
+  <canvas id="c"></canvas>
+  <div id="transcript"></div>
+  <div id="controls">
+    <button id="micBtn">🎙 MIC</button>
+    <button id="demoBtn">DEMO</button>
+    <button id="stopBtn">STOP</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight;}
+resize(); addEventListener('resize', resize);
+
+const cx = () => canvas.width/2;
+const cy = () => canvas.height/2;
+
+// ---- Icosahedron-ish point cloud (approx via fibonacci sphere) ----
+const N = 42;
+const pts = [];
+for(let i=0;i<N;i++){
+  const y = 1 - (i/(N-1))*2;
+  const r = Math.sqrt(1-y*y);
+  const theta = Math.PI*(3-Math.sqrt(5))*i;
+  pts.push({x:Math.cos(theta)*r, y:y, z:Math.sin(theta)*r});
+}
+// connect nearest neighbors for wire look
+const edges = [];
+for(let i=0;i<N;i++){
+  let dists = [];
+  for(let j=0;j<N;j++){
+    if(i===j) continue;
+    const dx=pts[i].x-pts[j].x, dy=pts[i].y-pts[j].y, dz=pts[i].z-pts[j].z;
+    dists.push([j, dx*dx+dy*dy+dz*dz]);
+  }
+  dists.sort((a,b)=>a[1]-b[1]);
+  for(let k=0;k<3;k++){
+    const j = dists[k][0];
+    const key = i<j? i+'_'+j : j+'_'+i;
+    if(!edges.find(e=>e.key===key)) edges.push({key, a:i, b:j});
+  }
+}
+
+let angleX=0, angleY=0;
+let amplitude=0, targetAmp=0;
+let mode = 'standby'; // standby, mic, demo
+let analyser=null, dataArray=null, audioCtx=null, stream=null;
+const particles = [];
+
+// ---- Ambient dust field (always drifting, brighter with amplitude) ----
+const DUST_N = 90;
+const dust = [];
+for(let i=0;i<DUST_N;i++){
+  dust.push({
+    a: Math.random()*Math.PI*2,
+    r: 0.3+Math.random()*2.6,
+    speed: 0.05+Math.random()*0.25,
+    size: 0.6+Math.random()*1.4,
+    phase: Math.random()*Math.PI*2
+  });
+}
+// ---- Ring-hugging pulse particles (run along the rings like data ticks) ----
+const RING_TICKS = 24;
+const ticks = [];
+for(let i=0;i<RING_TICKS;i++){
+  ticks.push({ring:i%3, a:(i/RING_TICKS)*Math.PI*2, speed:0.3+Math.random()*0.4});
+}
+
+function rotate(p, ax, ay){
+  let {x,y,z} = p;
+  // rotate around Y
+  let cosA=Math.cos(ay), sinA=Math.sin(ay);
+  let x1 = x*cosA + z*sinA;
+  let z1 = -x*sinA + z*cosA;
+  // rotate around X
+  let cosB=Math.cos(ax), sinB=Math.sin(ax);
+  let y1 = y*cosB - z1*sinB;
+  let z2 = y*sinB + z1*cosB;
+  return {x:x1,y:y1,z:z2};
+}
+
+function project(p, scale, dist){
+  const f = dist/(dist - p.z*scale*0.02);
+  return {x: cx()+p.x*scale*f, y: cy()+p.y*scale*f, s:f};
+}
+
+let t=0;
+function draw(){
+  requestAnimationFrame(draw);
+  t += 0.016;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // read audio amplitude
+  if(analyser){
+    analyser.getByteTimeDomainData(dataArray);
+    let sum=0;
+    for(let i=0;i<dataArray.length;i++){
+      const v=(dataArray[i]-128)/128;
+      sum+=v*v;
+    }
+    targetAmp = Math.min(1, Math.sqrt(sum/dataArray.length)*4.5);
+  } else if(mode==='demo'){
+    targetAmp = (Math.sin(t*3)*0.5+0.5) * (0.4+0.6*Math.max(0,Math.sin(t*0.7)));
+  } else {
+    targetAmp *= 0.9;
+  }
+  amplitude += (targetAmp-amplitude)*0.25;
+  document.getElementById('amp').textContent = amplitude.toFixed(2);
+
+  angleY += 0.004 + amplitude*0.02;
+  angleX += 0.0015;
+
+  const baseScale = Math.min(canvas.width, canvas.height)*0.16;
+  const coreScale = baseScale*(1+amplitude*0.55);
+
+  // outer glow rings (rotate + glow with amplitude)
+  const ringCount = 3;
+  for(let r=0;r<ringCount;r++){
+    const rad = baseScale*(2.1+r*0.55) + amplitude*30;
+    ctx.save();
+    ctx.translate(cx(),cy());
+    ctx.rotate(t*(0.15+r*0.08)*(r%2===0?1:-1));
+    ctx.beginPath();
+    const segs=64;
+    for(let i=0;i<=segs;i++){
+      const a = (i/segs)*Math.PI*2;
+      const wob = Math.sin(a*6+t*4)*amplitude*6;
+      const rr = rad+wob;
+      const x = Math.cos(a)*rr;
+      const y = Math.sin(a)*rr*0.42;
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.closePath();
+    ctx.strokeStyle = `rgba(255,255,255,${0.15+amplitude*0.5-r*0.04})`;
+    ctx.lineWidth = 1+amplitude*1.5;
+    ctx.shadowColor='#ffffff';
+    ctx.shadowBlur = 6+amplitude*20;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ring-hugging tick particles (data pulses running along the rings)
+  ticks.forEach(tk=>{
+    tk.a += tk.speed*0.02*(1+amplitude*3);
+    const rad = baseScale*(2.1+tk.ring*0.55) + amplitude*30;
+    const dir = tk.ring%2===0?1:-1;
+    const ang = tk.a + t*(0.15+tk.ring*0.08)*dir;
+    const x = cx()+Math.cos(ang)*rad;
+    const y = cy()+Math.sin(ang)*rad*0.42;
+    ctx.beginPath();
+    ctx.arc(x,y,1.3+amplitude*2,0,Math.PI*2);
+    ctx.fillStyle = `rgba(255,255,255,${0.5+amplitude*0.5})`;
+    ctx.shadowColor='#ffffff';
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  });
+
+  // ambient dust field, drifting slowly, flickers brighter with amplitude
+  dust.forEach(d=>{
+    d.a += d.speed*0.01;
+    const rad = baseScale*d.r*(1+amplitude*0.15);
+    const x = cx()+Math.cos(d.a)*rad;
+    const y = cy()+Math.sin(d.a)*rad*0.5;
+    const flicker = 0.15+0.25*Math.sin(t*2+d.phase)+amplitude*0.4;
+    ctx.beginPath();
+    ctx.arc(x,y,d.size,0,Math.PI*2);
+    ctx.fillStyle = `rgba(255,255,255,${Math.max(0,flicker)})`;
+    ctx.fill();
+  });
+
+  // wireframe sphere (icosphere-like)
+  const projected = pts.map(p=>{
+    const rp = rotate(p, angleX, angleY);
+    return project(rp, coreScale, 4);
+  });
+
+  ctx.lineWidth = 1;
+  edges.forEach(e=>{
+    const a=projected[e.a], b=projected[e.b];
+    const depth = (a.s+b.s)/2;
+    ctx.strokeStyle = `rgba(255,255,255,${0.12+depth*0.15+amplitude*0.25})`;
+    ctx.beginPath();
+    ctx.moveTo(a.x,a.y);
+    ctx.lineTo(b.x,b.y);
+    ctx.stroke();
+  });
+  projected.forEach(p=>{
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,1.4*p.s,0,Math.PI*2);
+    ctx.fillStyle = `rgba(255,255,255,${0.4+amplitude*0.5})`;
+    ctx.fill();
+  });
+
+  // glowing core
+  const grad = ctx.createRadialGradient(cx(),cy(),0,cx(),cy(),coreScale*0.9);
+  grad.addColorStop(0, `rgba(255,255,255,${0.9})`);
+  grad.addColorStop(0.25, `rgba(255,255,255,${0.55+amplitude*0.3})`);
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(cx(),cy(),coreScale*0.55*(1+amplitude*0.4),0,Math.PI*2);
+  ctx.fill();
+
+  // particle bursts on amplitude spikes — denser, with size/speed variance
+  const burstChance = 0.15+amplitude*0.85;
+  if(amplitude>0.12 && Math.random()<burstChance){
+    const bursts = 1+Math.floor(amplitude*4);
+    for(let b=0;b<bursts;b++){
+      const a = Math.random()*Math.PI*2;
+      const spd = 0.8+amplitude*4*Math.random();
+      particles.push({
+        x:cx()+Math.cos(a)*coreScale*0.55,
+        y:cy()+Math.sin(a)*coreScale*0.55,
+        vx:Math.cos(a)*spd,
+        vy:Math.sin(a)*spd,
+        size:0.8+Math.random()*1.8,
+        life:1
+      });
+    }
+  }
+  for(let i=particles.length-1;i>=0;i--){
+    const p=particles[i];
+    p.x+=p.vx; p.y+=p.vy; p.vx*=0.99; p.vy*=0.99; p.life-=0.018;
+    if(p.life<=0){particles.splice(i,1);continue;}
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);
+    ctx.fillStyle=`rgba(255,255,255,${p.life})`;
+    ctx.shadowColor='#ffffff';
+    ctx.shadowBlur = 4;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
+}
+draw();
+
+// ---- Audio setup ----
+const modeLabel = document.getElementById('mode');
+const micBtn = document.getElementById('micBtn');
+const demoBtn = document.getElementById('demoBtn');
+const stopBtn = document.getElementById('stopBtn');
+
+function setMode(m){
+  mode = m;
+  modeLabel.textContent = m==='mic' ? 'LISTENING' : m==='demo' ? 'DEMO MODE' : 'STANDBY';
+  micBtn.classList.toggle('active', m==='mic');
+  demoBtn.classList.toggle('active', m==='demo');
+}
+
+async function startMic(){
+  try{
+    stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const source = audioCtx.createMediaStreamSource(stream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 512;
+    dataArray = new Uint8Array(analyser.fftSize);
+    source.connect(analyser);
+    setMode('mic');
+  }catch(err){
+    document.getElementById('transcript').textContent = 'Không truy cập được micro — thử DEMO thay thế.';
+    setMode('standby');
+  }
+}
+
+function stopAll(){
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+  if(audioCtx){ audioCtx.close(); audioCtx=null; }
+  analyser=null; dataArray=null;
+  targetAmp=0;
+  setMode('standby');
+}
+
+micBtn.addEventListener('click', ()=>{ stopAll(); startMic(); });
+demoBtn.addEventListener('click', ()=>{ stopAll(); setMode('demo'); });
+stopBtn.addEventListener('click', stopAll);
+</script>
+</body>
+</html>
