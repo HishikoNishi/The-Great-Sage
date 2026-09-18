@@ -344,6 +344,74 @@ function stopAll(){
 micBtn.addEventListener('click', ()=>{ stopAll(); startMic(); });
 demoBtn.addEventListener('click', ()=>{ stopAll(); setMode('demo'); });
 stopBtn.addEventListener('click', stopAll);
+
+// ---- Python-Integration Bridge ----
+window.setMode = (m) => {
+  // Map Python modes to internal JS modes
+  const modeMap = {
+    'standby': 'standby',
+    'listening': 'mic',
+    'speaking': 'demo', // We use demo-like visual reactivity for voice lines
+    'thinking': 'standby'
+  };
+  const internalMode = modeMap[m] || 'standby';
+  setMode(internalMode);
+
+  // Update label to match requested state
+  const labels = {
+    'standby': 'STANDBY',
+    'listening': 'LISTENING',
+    'speaking': 'SPEAKING',
+    'thinking': 'THINKING'
+  };
+  modeLabel.textContent = labels[m] || 'STANDBY';
+  micBtn.classList.toggle('active', internalMode === 'mic');
+  demoBtn.classList.toggle('active', internalMode === 'demo');
+};
+
+window.setCaption = (text) => {
+  document.getElementById('transcript').textContent = text;
+};
+
+window.playVoiceLine = async (url) => {
+  try {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+
+    // Ensure analyser exists
+    if (!analyser) {
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 512;
+      dataArray = new Uint8Array(analyser.fftSize);
+    }
+
+    const response = await fetch(url);
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+
+    const source = audioCtx.createBufferSource();
+    source.buffer = audioBuffer;
+
+    // Connect: Source -> Analyser -> Destination (Speakers)
+    source.connect(analyser);
+    analyser.connect(audioCtx.destination);
+
+    source.start(0);
+
+    // Return a promise that resolves when the audio finishes
+    return new Promise((resolve) => {
+      source.onended = resolve;
+    });
+  } catch (err) {
+    console.error("Error playing voice line:", err);
+    window.setCaption("Error playing audio file.");
+  }
+};
+
+// Attach the original setMode to window for the buttons to keep working
+window.setMode_internal = setMode;
+
 </script>
 </body>
 </html>

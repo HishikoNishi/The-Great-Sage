@@ -1,0 +1,68 @@
+# Intent Registry
+# Maps LLM intent_id to a whitelisted action, audio file, and caption.
+
+open_explorer:
+  action: "open_app"
+  params: { "app_name": "explorer" }
+  audio_file: "Great-Sage-Open File Explorer.mp3"
+  caption: "Opening File Explorer."
+
+open_vscode:
+  action: "open_app"
+  params: { "app_name": "vscode" }
+  audio_file: "Great-Sage-Open Visual-Studio-Code.mp3"
+  caption: "Opening Visual Studio Code."
+
+open_music:
+  action: "open_app"
+  params: { "app_name": "music" }
+  audio_file: "Great-Sage-Open music app.mp3"
+  caption: "Opening your music application."
+
+open_browser:
+  action: "open_app"
+  params: { "app_name": "browser" }
+  audio_file: "Great-Sage-Open web.mp3"
+  caption: "Opening the web browser."
+
+system_lock:
+  action: "press_keys"
+  params: { "keys": ["win", "l"] }
+  audio_file: "Great-Sage-Screen lock mode.mp3"
+  caption: "Locking the workstation."
+
+system_sleep:
+  action: "system_cmd"
+  params: { "cmd": "rundll32.exe powrprof.dll,SetSuspendState 0,1,0" }
+  audio_file: "Great-Sage-turn on sleep mode.mp3"
+  caption: "Putting the system to sleep."
+
+system_shutdown:
+  action: "system_cmd"
+  params: { "cmd": "shutdown /s /t 0" }
+  audio_file: "Great-Sage-Shut down pc.mp3"
+  caption: "Shutting down the computer."
+
+system_reset:
+  action: "system_cmd"
+  params: { "cmd": "shutdown /r /t 0" }
+  audio_file: "Great-Sage-Reset system.mp3"
+  caption: "Resetting the system."
+
+close_app:
+  action: "press_keys"
+  params: { "keys": ["alt", "f4"] }
+  audio_file: "Great-Sage-Close programe.mp3"
+  caption: "Closing the current application."
+
+force_close:
+  action: "system_cmd"
+  params: { "cmd": "taskkill /f /fi \"status eq not responding\"" }
+  audio_file: "Great-Sage-Force off programe.mp3"
+  caption: "Force closing unresponsive applications."
+
+greeting:
+  action: "none"
+  params: {}
+  audio_file: "Great Sage - Chào buổi sáng.mp3"
+  caption: "Good morning. I am the Great Sage."
