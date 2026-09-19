@@ -55,11 +55,14 @@ class Brain:
                 {"role": "user", "content": text}
             ],
             "stream": False,
-            "format": "json"
+            "format": "json",
+            "options": {
+                "think": False
+            }
         }
 
         try:
-            response = requests.post(self.url, json=payload, timeout=10)
+            response = requests.post(self.url, json=payload, timeout=30)
             response.raise_for_status()
 
             result = response.json()

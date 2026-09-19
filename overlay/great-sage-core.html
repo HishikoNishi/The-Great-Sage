@@ -67,6 +67,7 @@
   <div id="hint">Nhấn MIC và nói để lõi phản ứng theo giọng.<br>Hoặc dùng DEMO nếu không có micro.</div>
   <canvas id="c"></canvas>
   <div id="transcript"></div>
+  <audio id="sage-audio" style="display:none;"></audio>
   <div id="controls">
     <button id="micBtn">🎙 MIC</button>
     <button id="demoBtn">DEMO</button>
@@ -310,7 +311,7 @@ const micBtn = document.getElementById('micBtn');
 const demoBtn = document.getElementById('demoBtn');
 const stopBtn = document.getElementById('stopBtn');
 
-function setMode(m){
+function applyMode(m){
   mode = m;
   modeLabel.textContent = m==='mic' ? 'LISTENING' : m==='demo' ? 'DEMO MODE' : 'STANDBY';
   micBtn.classList.toggle('active', m==='mic');
@@ -326,10 +327,10 @@ async function startMic(){
     analyser.fftSize = 512;
     dataArray = new Uint8Array(analyser.fftSize);
     source.connect(analyser);
-    setMode('mic');
+    applyMode('mic');
   }catch(err){
     document.getElementById('transcript').textContent = 'Không truy cập được micro — thử DEMO thay thế.';
-    setMode('standby');
+    applyMode('standby');
   }
 }
 
@@ -338,26 +339,31 @@ function stopAll(){
   if(audioCtx){ audioCtx.close(); audioCtx=null; }
   analyser=null; dataArray=null;
   targetAmp=0;
-  setMode('standby');
+  applyMode('standby');
 }
 
 micBtn.addEventListener('click', ()=>{ stopAll(); startMic(); });
-demoBtn.addEventListener('click', ()=>{ stopAll(); setMode('demo'); });
+demoBtn.addEventListener('click', ()=>{ stopAll(); applyMode('demo'); });
 stopBtn.addEventListener('click', stopAll);
 
 // ---- Python-Integration Bridge ----
+const sageAudio = document.getElementById('sage-audio');
+let audioSource = null;
+
 window.setMode = (m) => {
-  // Map Python modes to internal JS modes
   const modeMap = {
     'standby': 'standby',
     'listening': 'mic',
-    'speaking': 'demo', // We use demo-like visual reactivity for voice lines
+    'speaking': 'speaking',
     'thinking': 'standby'
   };
   const internalMode = modeMap[m] || 'standby';
-  setMode(internalMode);
 
-  // Update label to match requested state
+  // If we are in speaking mode, we want to ensure we don't trigger the 'demo' fallback
+  // unless we actually want the fake animation.
+  // We'll update applyMode to handle 'speaking' by not triggering the sine wave.
+  applyMode(internalMode);
+
   const labels = {
     'standby': 'STANDBY',
     'listening': 'LISTENING',
@@ -379,29 +385,31 @@ window.playVoiceLine = async (url) => {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     }
 
-    // Ensure analyser exists
     if (!analyser) {
       analyser = audioCtx.createAnalyser();
       analyser.fftSize = 512;
       dataArray = new Uint8Array(analyser.fftSize);
     }
 
-    const response = await fetch(url);
-    const arrayBuffer = await response.arrayBuffer();
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    // Create the source node only once
+    if (!audioSource) {
+      audioSource = audioCtx.createMediaElementSource(sageAudio);
+      audioSource.connect(analyser);
+      analyser.connect(audioCtx.destination);
+    }
 
-    const source = audioCtx.createBufferSource();
-    source.buffer = audioBuffer;
-
-    // Connect: Source -> Analyser -> Destination (Speakers)
-    source.connect(analyser);
-    analyser.connect(audioCtx.destination);
-
-    source.start(0);
+    sageAudio.src = url;
 
     // Return a promise that resolves when the audio finishes
     return new Promise((resolve) => {
-      source.onended = resolve;
+      sageAudio.onended = () => {
+        window.setMode('standby');
+        resolve();
+      };
+      sageAudio.play().catch(e => {
+        console.error("Playback failed:", e);
+        resolve();
+      });
     });
   } catch (err) {
     console.error("Error playing voice line:", err);
@@ -409,8 +417,6 @@ window.playVoiceLine = async (url) => {
   }
 };
 
-// Attach the original setMode to window for the buttons to keep working
-window.setMode_internal = setMode;
 
 </script>
 </body>

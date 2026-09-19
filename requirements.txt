@@ -9,6 +9,7 @@ pyyaml
 python-dotenv
 faster-whisper
 ollama
+requests
 pynput
 pyautogui
 pystray

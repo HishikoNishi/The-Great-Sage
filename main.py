@@ -127,24 +127,32 @@ class GreatSageApp:
 
     def setup_hotkey(self):
         """Sets up the global hotkey trigger."""
-        # Convert 'ctrl+alt+s' to pynput format
-        # Simple mapping for the example
-        hotkey_map = {
-            "ctrl": keyboard.Key.ctrl,
-            "alt": keyboard.Key.alt,
-            "shift": keyboard.Key.shift,
-            "s": "s"
-        }
+        # Convert 'ctrl+alt+s' to pynput format: '<ctrl>+<alt>+s'
+        # pynput's GlobalHotKeys expects keys as strings. Special keys are wrapped in <>.
+        special_keys = {'ctrl', 'alt', 'shift', 'win', 'cmd'}
 
-        keys = []
-        for k in HOTKEY.split('+'):
-            keys.append(hotkey_map.get(k, k))
+        parts = HOTKEY.split('+')
+        formatted_parts = []
+        for p in parts:
+            p = p.strip().lower()
+            if p in special_keys:
+                formatted_parts.append(f"<{p}>")
+            else:
+                formatted_parts.append(p)
 
-        with keyboard.GlobalHotKeys({
-            '<'.join([f"<{k}>" if isinstance(k, keyboard.Key) else k for k in keys]): self.trigger_listen
-        }) as h:
-            # This blocks, so we run it in a thread or as the main process
-            h.join()
+        hotkey_string = "+".join(formatted_parts)
+        logger.info(f"Registering hotkey: {hotkey_string}")
+
+        # Start the hotkey listener in a background thread
+        def run_listener():
+            with keyboard.GlobalHotKeys({
+                hotkey_string: self.trigger_listen
+            }) as h:
+                h.join()
+
+        listener_thread = threading.Thread(target=run_listener, daemon=True)
+        listener_thread.start()
+
 
     def quit_app(self):
         logger.info("Quitting Great Sage...")
@@ -152,22 +160,28 @@ class GreatSageApp:
         os._exit(0)
 
     def run(self):
-        """Launches all components."""
+        """Launches all components. webview.start() MUST be on the main thread."""
         logger.info("Starting Great Sage Assistant...")
 
-        # Start Tray
+        # 1. Start Tray in background thread
         self.tray.start()
 
-        # Start Overlay in a separate thread
-        overlay.start()
-        self.overlay_thread = threading.Thread(target=overlay.run, daemon=True)
-        self.overlay_thread.start()
+        # 2. Start Hotkey listener in background thread
+        self.setup_hotkey()
 
-        # Start Hotkey listener (blocking)
-        try:
-            self.setup_hotkey()
-        except KeyboardInterrupt:
-            self.quit_app()
+        # 3. Initialize Overlay
+        overlay.start()
+
+        # 4. Launch webview.start() on the main thread (Blocking call)
+        # This is required by pywebview
+        overlay.run()
+
+    def quit_app(self):
+        logger.info("Quitting Great Sage...")
+        self.tray.stop()
+        # Since webview.start() is blocking the main thread,
+        # we use os._exit to force the whole process to terminate.
+        os._exit(0)
 
 if __name__ == "__main__":
     app = GreatSageApp()
