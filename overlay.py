@@ -54,8 +54,9 @@ class OverlayManager:
     def play_voice_line(self, file_url: str):
         """Play a voice line and drive the visualizer via JS."""
         if self.window:
-            # Convert local path to file:// URL
-            url = f"file://{file_url}"
+            from pathlib import Path
+            # Convert local path to a proper file:/// URI for Windows/Linux/macOS
+            url = Path(file_url).resolve().as_uri()
             # This returns a promise in JS; we can't easily await it in evaluate_js
             # but the JS function handles the playback and reactivity.
             self.window.evaluate_js(f"window.playVoiceLine('{url}')")

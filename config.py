@@ -11,6 +11,7 @@ BASE_DIR = Path(__file__).parent.absolute()
 # Ollama Config
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:4b")
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "60"))
 
 # Application Settings
 HOTKEY = os.getenv("HOTKEY", "ctrl+alt+s")

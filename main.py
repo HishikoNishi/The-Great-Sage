@@ -1,6 +1,7 @@
 import threading
 import time
 import logging
+import os
 from pynput import keyboard
 from config import HOTKEY, LOG_FILE
 from stt import stt
@@ -9,6 +10,7 @@ from intents import registry
 from actions import executor
 from overlay import overlay
 from tray import TrayManager
+from audio import play_audio
 
 # Logging Setup
 logging.basicConfig(
@@ -100,7 +102,18 @@ class GreatSageApp:
 
                     from config import get_audio_path
                     if voice_file:
-                        overlay.play_voice_line(get_audio_path(voice_file))
+                        audio_path = get_audio_path(voice_file)
+                        if os.path.exists(audio_path):
+                            try:
+                                # Trigger overlay for visualizer and caption
+                                # This now handles the actual playback via the JS <audio> element
+                                overlay.play_voice_line(audio_path)
+                            except Exception as e:
+                                logger.error(f"Overlay playback failed: {e}, falling back to local play_audio")
+                                play_audio(audio_path)
+                        else:
+                            logger.error(f"Audio file missing for intent {intent_id}: {audio_path}")
+                            overlay.set_caption(f"Audio missing: {voice_file}")
                 else:
                     logger.warning(f"Intent {intent_id} not found in registry.")
                     overlay.set_caption(f"I don't know how to perform {intent_id}.")

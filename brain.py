@@ -2,7 +2,7 @@ import requests
 import json
 import logging
 from typing import Dict, Any, Optional
-from config import OLLAMA_HOST, OLLAMA_MODEL
+from config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_TIMEOUT
 
 logger = logging.getLogger("great_sage.brain")
 
@@ -62,7 +62,7 @@ class Brain:
         }
 
         try:
-            response = requests.post(self.url, json=payload, timeout=30)
+            response = requests.post(self.url, json=payload, timeout=OLLAMA_TIMEOUT)
             response.raise_for_status()
 
             result = response.json()

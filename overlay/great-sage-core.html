@@ -64,12 +64,11 @@
 <body>
 <div id="wrap">
   <div id="status">GREAT&nbsp;SAGE&nbsp;— <b id="mode">STANDBY</b><br>AMPLITUDE&nbsp;<span id="amp">0.00</span></div>
-  <div id="hint">Nhấn MIC và nói để lõi phản ứng theo giọng.<br>Hoặc dùng DEMO nếu không có micro.</div>
   <canvas id="c"></canvas>
   <div id="transcript"></div>
-  <audio id="sage-audio" style="display:none;"></audio>
+  <audio id="sage-audio" crossorigin="anonymous" style="display:none;"></audio>
   <div id="controls">
-    <button id="micBtn">🎙 MIC</button>
+    <button id="micBtn" style="fill-opacity: 0;">MIC</button>
     <button id="demoBtn">DEMO</button>
     <button id="stopBtn">STOP</button>
   </div>
