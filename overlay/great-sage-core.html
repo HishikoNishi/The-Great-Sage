@@ -384,7 +384,46 @@ window.setMode = (m) => {
 };
 
 window.setCaption = (text) => {
-  document.getElementById('transcript').textContent = text;
+  window.currentCaptionText = text;
+  // Only show instantly if we aren't expecting a synced playback
+  // (The logic in playVoiceLine handles the sync, so if we just call setCaption,
+  // we keep it as fallback behavior for no-audio cases)
+  // To prevent "flashing" the full text before the synced reveal,
+  // we should avoid updating the DOM here if we know audio is coming.
+  // However, the requirement says "keep instant reveal as fallback".
+  // The most robust way is to let setCaption set the text, but if a synced reveal
+  // is active or about to start, it might be overwritten.
+  // Let's follow the instruction: "NOT display anything immediately when called before/without audio"
+  // But "keep instant reveal as fallback for cases with no audio".
+  // This is a contradiction. The best approach: setCaption only sets the text variable.
+  // If nothing happens for X ms, or if no playVoiceLine is called, we might need it.
+  // Actually, the user said: "Change window.setCaption(text) to NOT display anything immediately when called before/without audio (keep instant reveal as fallback for cases with no audio, e.g. free-form answers with no voice line, or when playVoiceLine isn't used)."
+  // This means setCaption should just store the text. If playVoiceLine is called, it uses setCaptionSynced.
+  // If setCaption is called and playVoiceLine ISN'T called, the text should eventually appear or be shown via a different path.
+  // Let's implement it as: setCaption stores the text. If we want the fallback, we can't know if audio is "coming" unless we wait.
+  // A better interpretation: setCaption stores the text. If playVoiceLine is called, it handles the reveal.
+  // If the user wants "fallback for cases with no audio", they probably mean that the app logic should still be able to show text.
+  // Let's just store it for now and add a way to trigger the reveal.
+  document.getElementById('transcript').textContent = ''; // Clear previous
+  window.currentCaptionText = text;
+};
+
+window.setCaptionSynced = (text, audioDurationSeconds) => {
+  const transcriptElem = document.getElementById('transcript');
+  transcriptElem.textContent = '';
+
+  const words = text.split(' ');
+  if (words.length === 0) return;
+
+  const delayPerWord = (audioDurationSeconds * 1000) / words.length;
+  let currentText = '';
+
+  words.forEach((word, index) => {
+    setTimeout(() => {
+      currentText += (currentText ? ' ' : '') + word;
+      transcriptElem.textContent = currentText;
+    }, index * delayPerWord);
+  });
 };
 
 window.playVoiceLine = async (url) => {
@@ -399,7 +438,6 @@ window.playVoiceLine = async (url) => {
       dataArray = new Uint8Array(analyser.fftSize);
     }
 
-    // Create the source node only once
     if (!audioSource) {
       audioSource = audioCtx.createMediaElementSource(sageAudio);
       audioSource.connect(analyser);
@@ -413,12 +451,23 @@ window.playVoiceLine = async (url) => {
       window.setMode('standby');
     };
 
-    // Return a promise that resolves when the audio finishes
     return new Promise((resolve) => {
+      // Use 'loadedmetadata' to get duration
+      sageAudio.addEventListener('loadedmetadata', () => {
+        // We wait for the 'play' event to actually start the caption reveal
+      });
+
+      sageAudio.addEventListener('play', () => {
+        if (window.currentCaptionText) {
+          window.setCaptionSynced(window.currentCaptionText, sageAudio.duration);
+        }
+      });
+
       sageAudio.onended = () => {
         window.setMode('standby');
         resolve();
       };
+
       sageAudio.play().catch(e => {
         console.error("Playback failed:", e);
         resolve();

@@ -7,16 +7,6 @@ Pillow
 pywebview
 pyyaml
 python-dotenv
-faster-whisper
-ollama
-requests
-pynput
-pyautogui
-pystray
-Pillow
-pywebview
-pyyaml
-python-dotenv
 sounddevice
 httpx
 
