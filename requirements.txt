@@ -18,4 +18,5 @@ pywebview
 pyyaml
 python-dotenv
 sounddevice
+httpx
 

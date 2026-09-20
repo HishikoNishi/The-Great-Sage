@@ -122,8 +122,35 @@ class GreatSageApp:
                 answer_text = result.get("text", "")
                 overlay.set_mode('speaking')
                 overlay.set_caption(answer_text)
-                # Play a short generic ack sound if configured, else silence
-                time.sleep(3) # Give user time to read
+
+                try:
+                    from translate import to_great_sage_japanese
+                    from tts import synthesize_great_sage_voice
+
+                    # 1. Translate English answer to Sage-style Japanese
+                    japanese_text = to_great_sage_japanese(answer_text)
+
+                    # 2. Synthesize Japanese text to audio
+                    audio_path = synthesize_great_sage_voice(japanese_text)
+
+                    # Log verification: path and size
+                    file_size = os.path.getsize(audio_path)
+                    logger.info(f"TTS synthesized successfully: {audio_path} ({file_size} bytes)")
+
+                    # 3. Play audio via existing overlay mechanism
+                    overlay.play_voice_line(str(audio_path))
+
+                    # Cleanup: we can't delete immediately as playback is async in JS,
+                    # but for now we let the OS handle temp files or cleanup in next run.
+                    # In a production version, we'd track these files for deletion.
+
+                except Exception as e:
+                    logger.error(f"Dynamic voice pipeline failed: {e}")
+                    # Fallback: caption is already set, just sleep
+                    time.sleep(3)
+
+                # Ensure user has time to read if audio was short or failed
+                time.sleep(3)
 
         except Exception as e:
             logger.exception(f"Error in listen loop: {e}")

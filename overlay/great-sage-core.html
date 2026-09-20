@@ -40,7 +40,7 @@
     text-shadow:0 0 8px rgba(255,255,255,0.6);
   }
   #controls{
-    position:absolute;bottom:24px;display:flex;gap:12px;
+    position:absolute;bottom:24px;display:none;gap:12px;
   }
   button{
     background:transparent;
@@ -57,7 +57,7 @@
   button.active{background:rgba(255,255,255,0.15);border-color:var(--amber);color:var(--amber);}
   #hint{
     position:absolute;top:18px;right:18px;font-size:10px;color:var(--cyan-dim);
-    text-align:right;line-height:1.6;max-width:220px;
+    text-align:right;line-height:1.6;max-width:220px;display:none;
   }
 </style>
 </head>
@@ -349,6 +349,15 @@ stopBtn.addEventListener('click', stopAll);
 const sageAudio = document.getElementById('sage-audio');
 let audioSource = null;
 
+// Debug mode check: show controls and hint if ?debug=1 is in URL
+(function() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('debug') === '1') {
+    document.getElementById('controls').style.display = 'flex';
+    document.getElementById('hint').style.display = 'block';
+  }
+})();
+
 window.setMode = (m) => {
   const modeMap = {
     'standby': 'standby',
@@ -398,6 +407,11 @@ window.playVoiceLine = async (url) => {
     }
 
     sageAudio.src = url;
+
+    sageAudio.onerror = (e) => {
+      console.error("Audio element error:", sageAudio.error);
+      window.setMode('standby');
+    };
 
     // Return a promise that resolves when the audio finishes
     return new Promise((resolve) => {

@@ -56,9 +56,8 @@ class Brain:
             ],
             "stream": False,
             "format": "json",
-            "options": {
-                "think": False
-            }
+            "think": False,
+            "keep_alive": "30m"
         }
 
         try:
@@ -67,6 +66,11 @@ class Brain:
 
             result = response.json()
             content = result.get("message", {}).get("content", "{}")
+
+            # Post-process to remove <think> blocks if present
+            if "</think>" in content:
+                content = content.split("</think>")[-1].strip()
+
             return json.loads(content)
 
         except Exception as e:
