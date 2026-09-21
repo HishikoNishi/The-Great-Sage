@@ -56,7 +56,6 @@ class Brain:
             ],
             "stream": False,
             "format": "json",
-            "think": False,
             "keep_alive": "30m"
         }
 

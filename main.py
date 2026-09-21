@@ -54,29 +54,42 @@ class GreatSageApp:
 
     def listen_loop(self):
         """The core pipeline: STT -> Brain -> Action -> Feedback."""
+        start_total = time.time()
         self.is_listening = True
         overlay.set_mode('listening')
         overlay.set_caption("Listening...")
 
         try:
             # 1. STT
+            stt_start = time.time()
             text = stt.record_and_transcribe()
+            stt_duration = time.time() - stt_start
+
             if not text:
                 logger.info("No speech detected.")
+                logger.info(f"[TIMING] STT recording: {stt_duration:.2f}s")
                 self.reset_to_standby()
                 return
 
             logger.info(f"User said: {text}")
+            logger.info(f"[TIMING] STT recording/transcription: {stt_duration:.2f}s")
+
             overlay.set_mode('thinking')
             overlay.set_caption("Thinking...")
 
             # 2. Brain (Ollama)
+            brain_start = time.time()
             result = brain.classify(text)
+            brain_duration = time.time() - brain_start
+
             if not result:
                 logger.error("Brain failed to classify request.")
+                logger.info(f"[TIMING] Brain classification: {brain_duration:.2f}s")
                 overlay.set_caption("I'm having trouble thinking right now.")
                 self.reset_to_standby()
                 return
+
+            logger.info(f"[TIMING] Brain classification: {brain_duration:.2f}s")
 
             # 3. Resolve & Execute
             if result.get("type") == "action":
@@ -85,15 +98,12 @@ class GreatSageApp:
 
                 intent_cfg = registry.get_intent(intent_id)
                 if intent_cfg:
-                    # Execute action
                     action_name = intent_cfg['action']
                     action_params = intent_cfg.get('params', {})
-                    # Merge dynamic params from LLM if any
                     action_params.update(params)
 
                     executor.execute(action_name, action_params)
 
-                    # Feedback: Audio & Visuals
                     voice_file = intent_cfg.get('audio_file')
                     caption = intent_cfg.get('caption', "")
 
@@ -105,9 +115,9 @@ class GreatSageApp:
                         audio_path = get_audio_path(voice_file)
                         if os.path.exists(audio_path):
                             try:
-                                # Trigger overlay for visualizer and caption
-                                # This now handles the actual playback via the JS <audio> element
+                                play_start = time.time()
                                 overlay.play_voice_line(audio_path)
+                                logger.info(f"[TIMING] Overlay playback trigger: {time.time() - play_start:.2f}s")
                             except Exception as e:
                                 logger.error(f"Overlay playback failed: {e}, falling back to local play_audio")
                                 play_audio(audio_path)
@@ -127,29 +137,30 @@ class GreatSageApp:
                     from translate import to_great_sage_japanese
                     from tts import synthesize_great_sage_voice
 
-                    # 1. Translate English answer to Sage-style Japanese
+                    # 1. Translation
+                    trans_start = time.time()
                     japanese_text = to_great_sage_japanese(answer_text)
+                    trans_duration = time.time() - trans_start
+                    logger.info(f"[TIMING] Translation: {trans_duration:.2f}s")
 
-                    # 2. Synthesize Japanese text to audio
+                    # 2. Synthesis
+                    tts_start = time.time()
                     audio_path = synthesize_great_sage_voice(japanese_text)
+                    tts_duration = time.time() - tts_start
+                    logger.info(f"[TIMING] Fish Audio TTS request: {tts_duration:.2f}s")
 
-                    # Log verification: path and size
                     file_size = os.path.getsize(audio_path)
                     logger.info(f"TTS synthesized successfully: {audio_path} ({file_size} bytes)")
 
-                    # 3. Play audio via existing overlay mechanism
+                    # 3. Playback
+                    play_start = time.time()
                     overlay.play_voice_line(str(audio_path))
-
-                    # Cleanup: we can't delete immediately as playback is async in JS,
-                    # but for now we let the OS handle temp files or cleanup in next run.
-                    # In a production version, we'd track these files for deletion.
+                    logger.info(f"[TIMING] Overlay playback trigger: {time.time() - play_start:.2f}s")
 
                 except Exception as e:
                     logger.error(f"Dynamic voice pipeline failed: {e}")
-                    # Fallback: caption is already set, just sleep
                     time.sleep(3)
 
-                # Ensure user has time to read if audio was short or failed
                 time.sleep(3)
 
         except Exception as e:
@@ -157,6 +168,8 @@ class GreatSageApp:
             overlay.set_caption("An unexpected error occurred.")
 
         finally:
+            total_duration = time.time() - start_total
+            logger.info(f"[TIMING] Total pipeline: {total_duration:.2f}s")
             self.reset_to_standby()
 
     def reset_to_standby(self):

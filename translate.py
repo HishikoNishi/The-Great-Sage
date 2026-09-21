@@ -1,6 +1,6 @@
 import requests
 import logging
-from config import OLLAMA_HOST, TRANSLATE_MODEL, OLLAMA_TIMEOUT
+from config import OLLAMA_HOST, OLLAMA_MODEL, OLLAMA_TIMEOUT
 
 logger = logging.getLogger("great_sage.translate")
 
@@ -18,6 +18,8 @@ Your task is to translate English text into Japanese while strictly adhering to 
    - "分析。" (Analysis) - For explaining a complex situation.
 5. Content: You must always translate the FULL meaning of the input text. The opener word is a prefix ONLY — never let it replace or omit the actual translated content that follows it.
 6. Output: Plain Japanese text only. No romaji, no English.
+
+IMPORTANT: Do NOT summarize the input or respond with a generic acknowledgment (e.g., avoid "理解しました" or "承知した"). Every single piece of information in the English text must be represented in the Japanese translation, especially when explaining limitations or capabilities.
 
 Examples:
 English: "The weather is clear today and it will remain so for the next three hours."
@@ -37,7 +39,7 @@ def to_great_sage_japanese(english_text: str) -> str:
     """Translates English text to Great Sage style Japanese using Ollama."""
     url = f"{OLLAMA_HOST}/api/chat"
     payload = {
-        "model": TRANSLATE_MODEL,
+        "model": OLLAMA_MODEL,
         "messages": [
             {"role": "system", "content": SAGE_STYLE_PROMPT},
             {"role": "user", "content": english_text}
@@ -60,6 +62,14 @@ def to_great_sage_japanese(english_text: str) -> str:
         # Post-process to remove <think> blocks if present
         if "</think>" in content:
             content = content.split("</think>")[-1].strip()
+
+        # Deterministic fix for missing period after opener
+        content = content.strip()
+        openers = ["告", "回", "了解", "分析"]
+        for opener in openers:
+            if content.startswith(opener) and not content.startswith(opener + "。"):
+                content = opener + "。" + content[len(opener):]
+                break
 
         logger.debug(f"Ollama raw translation response (cleaned): {content}")
 
