@@ -22,10 +22,13 @@
   #wrap{
     position:relative;width:100%;height:100%;
     display:flex;flex-direction:column;align-items:center;justify-content:center;
+    opacity:0;
+    transition:opacity 0.5s ease-out;
     background:
       radial-gradient(circle at 50% 50%, rgba(255,255,255,0.05), transparent 60%),
       repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 3px);
   }
+  #wrap.window-visible{opacity:1;}
   canvas{display:block;}
   #status{
     position:absolute;top:18px;left:18px;
@@ -67,6 +70,12 @@
   <canvas id="c"></canvas>
   <div id="transcript"></div>
   <audio id="sage-audio" crossorigin="anonymous" style="display:none;"></audio>
+  <audio id="sfx-startup" preload="auto" style="display:none;"></audio>
+  <audio id="sfx-overlay-appear" preload="auto" style="display:none;"></audio>
+  <audio id="sfx-core-open" preload="auto" style="display:none;"></audio>
+  <audio id="sfx-core-close" preload="auto" style="display:none;"></audio>
+  <audio id="sfx-interface-click" preload="auto" style="display:none;"></audio>
+  <audio id="sfx-thinking" preload="auto" style="display:none;"></audio>
   <div id="controls">
     <button id="micBtn" style="fill-opacity: 0;">MIC</button>
     <button id="demoBtn">DEMO</button>
@@ -75,6 +84,15 @@
 </div>
 
 <script>
+// Python bridge stubs (full implementations assigned before first paint completes)
+window.setMode = window.setMode || function(){};
+window.setCaption = window.setCaption || function(){};
+window.setCaptionSynced = window.setCaptionSynced || function(){};
+window.playVoiceLine = window.playVoiceLine || function(){ return Promise.resolve(); };
+window.playUiSfx = window.playUiSfx || function(){};
+window.triggerFailure = window.triggerFailure || function(){};
+window.triggerSuccess = window.triggerSuccess || function(){};
+
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 function resize(){canvas.width=innerWidth;canvas.height=innerHeight;}
@@ -91,6 +109,40 @@ for(let i=0;i<N;i++){
   const r = Math.sqrt(1-y*y);
   const theta = Math.PI*(3-Math.sqrt(5))*i;
   pts.push({x:Math.cos(theta)*r, y:y, z:Math.sin(theta)*r});
+}
+const ptRest = pts.map(p=>({x:p.x,y:p.y,z:p.z}));
+const ptBootFrom = pts.map(p=>{
+  const mag = 2.4 + Math.random()*2.2;
+  const j = () => (Math.random()-0.5)*0.35;
+  return {x:p.x*mag+j(), y:p.y*mag+j(), z:p.z*mag+j()};
+});
+const BOOT_DURATION_MS = 1600;
+let bootActive = true;
+let bootStartTime = 0;
+let bootGlow = 0;
+
+const ringPulse = { active:false, start:0, kind:'open', mul:1 };
+const RING_PULSE_MS = 300;
+function easeOutCubic(t){ return 1-Math.pow(1-t,3); }
+function startRingPulse(kind){
+  ringPulse.active = true;
+  ringPulse.start = performance.now();
+  ringPulse.kind = kind;
+}
+function updateRingPulse(){
+  if(!ringPulse.active) return 1;
+  const t = Math.min(1, (performance.now()-ringPulse.start)/RING_PULSE_MS);
+  const e = easeOutCubic(t);
+  if(ringPulse.kind === 'open'){
+    ringPulse.mul = 1 + 0.15*(1-e);
+  } else {
+    ringPulse.mul = 0.9 + 0.1*e;
+  }
+  if(t >= 1){
+    ringPulse.mul = 1;
+    ringPulse.active = false;
+  }
+  return ringPulse.mul;
 }
 // connect nearest neighbors for wire look
 const edges = [];
@@ -114,6 +166,72 @@ let amplitude=0, targetAmp=0;
 let mode = 'standby'; // standby, mic, demo
 let analyser=null, dataArray=null, audioCtx=null, stream=null;
 const particles = [];
+
+let displayMode = 'standby';
+let thinkingTickAngle = 0;
+let thinkingTickLastStep = 0;
+let thinkingTickFlashUntil = 0;
+const THINKING_TICK_STEP_MS = 400;
+const THINKING_TICK_INCREMENT = Math.PI / 6;
+
+let outcomeGlowMultiplier = 1;
+let outcomeGlowTarget = 1;
+let outcomeGlowUntil = 0;
+
+const successPing = {
+  active: false,
+  start: 0,
+  startR: 0,
+  endR: 0,
+  pendingScale: false,
+};
+
+function resetThinkingTick(){
+  thinkingTickAngle = 0;
+  thinkingTickLastStep = 0;
+  thinkingTickFlashUntil = 0;
+}
+
+function updateOutcomeGlow(now){
+  if(now < outcomeGlowUntil){
+    outcomeGlowMultiplier += (outcomeGlowTarget - outcomeGlowMultiplier) * 0.22;
+  } else {
+    outcomeGlowTarget = 1;
+    outcomeGlowMultiplier += (1 - outcomeGlowMultiplier) * 0.1;
+  }
+}
+
+function spawnFailureParticles(){
+  const count = 15 + Math.floor(Math.random() * 6);
+  for(let i=0;i<count;i++){
+    particles.push({
+      type: 'fail',
+      x: Math.random() * canvas.width,
+      y: -8 - Math.random() * 24,
+      vx: (Math.random() - 0.5) * 1.4,
+      vy: 1.2 + Math.random() * 2.8,
+      size: 0.7 + Math.random() * 1.5,
+      life: 1,
+      maxLife: 1.5 + Math.random() * 0.55,
+    });
+  }
+}
+
+window.triggerFailure = ()=>{
+  const now = performance.now();
+  outcomeGlowTarget = 0.4;
+  outcomeGlowUntil = now + 600;
+  spawnFailureParticles();
+};
+
+window.triggerSuccess = ()=>{
+  const now = performance.now();
+  outcomeGlowTarget = 1.4;
+  outcomeGlowUntil = now + 150;
+  successPing.active = true;
+  successPing.start = now;
+  successPing.pendingScale = true;
+};
 
 // ---- Ambient dust field (always drifting, brighter with amplitude) ----
 const DUST_N = 90;
@@ -177,19 +295,66 @@ function draw(){
   amplitude += (targetAmp-amplitude)*0.25;
   document.getElementById('amp').textContent = amplitude.toFixed(2);
 
-  angleY += 0.004 + amplitude*0.02;
-  angleX += 0.0015;
+  if(bootActive){
+    const elapsed = performance.now() - bootStartTime;
+    const bt = Math.min(1, elapsed / BOOT_DURATION_MS);
+    const be = easeOutCubic(bt);
+    for(let i=0;i<N;i++){
+      pts[i].x = ptBootFrom[i].x + (ptRest[i].x - ptBootFrom[i].x)*be;
+      pts[i].y = ptBootFrom[i].y + (ptRest[i].y - ptBootFrom[i].y)*be;
+      pts[i].z = ptBootFrom[i].z + (ptRest[i].z - ptBootFrom[i].z)*be;
+    }
+    bootGlow = be;
+    if(bt >= 1){
+      bootActive = false;
+      for(let i=0;i<N;i++){
+        pts[i].x = ptRest[i].x;
+        pts[i].y = ptRest[i].y;
+        pts[i].z = ptRest[i].z;
+      }
+      bootGlow = 1;
+    }
+  }
+
+  const ringMul = updateRingPulse();
+  const spinMul = bootActive ? 0.15 + bootGlow*0.85 : 1;
+  angleY += (0.004 + amplitude*0.02)*spinMul;
+  angleX += 0.0015*spinMul;
 
   const baseScale = Math.min(canvas.width, canvas.height)*0.16;
   const coreScale = baseScale*(1+amplitude*0.55);
+  const now = performance.now();
+  updateOutcomeGlow(now);
+  const glowMul = bootGlow * outcomeGlowMultiplier;
+
+  if(successPing.pendingScale){
+    successPing.startR = coreScale * 0.6;
+    successPing.endR = coreScale * 3;
+    successPing.pendingScale = false;
+  }
+
+  const isThinking = displayMode === 'thinking';
+  if(isThinking){
+    if(!thinkingTickLastStep) thinkingTickLastStep = now;
+    if(now - thinkingTickLastStep >= THINKING_TICK_STEP_MS){
+      thinkingTickAngle += THINKING_TICK_INCREMENT;
+      thinkingTickLastStep = now;
+      thinkingTickFlashUntil = now + 100;
+    }
+  } else if(thinkingTickLastStep){
+    resetThinkingTick();
+  }
 
   // outer glow rings (rotate + glow with amplitude)
   const ringCount = 3;
   for(let r=0;r<ringCount;r++){
-    const rad = baseScale*(2.1+r*0.55) + amplitude*30;
+    const rad = (baseScale*(2.1+r*0.55) + amplitude*30)*ringMul;
     ctx.save();
     ctx.translate(cx(),cy());
-    ctx.rotate(t*(0.15+r*0.08)*(r%2===0?1:-1));
+    const ringSpin = isThinking && r === ringCount - 1
+      ? thinkingTickAngle
+      : t*(0.15+r*0.08)*(r%2===0?1:-1);
+    ctx.rotate(ringSpin);
     ctx.beginPath();
     const segs=64;
     for(let i=0;i<=segs;i++){
@@ -201,7 +366,8 @@ function draw(){
       if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
     }
     ctx.closePath();
-    ctx.strokeStyle = `rgba(255,255,255,${0.15+amplitude*0.5-r*0.04})`;
+    const ringAlpha = (0.15+amplitude*0.5-r*0.04)*glowMul;
+    ctx.strokeStyle = `rgba(255,255,255,${ringAlpha})`;
     ctx.lineWidth = 1+amplitude*1.5;
     ctx.shadowColor='#ffffff';
     ctx.shadowBlur = 6+amplitude*20;
@@ -212,7 +378,7 @@ function draw(){
   // ring-hugging tick particles (data pulses running along the rings)
   ticks.forEach(tk=>{
     tk.a += tk.speed*0.02*(1+amplitude*3);
-    const rad = baseScale*(2.1+tk.ring*0.55) + amplitude*30;
+    const rad = (baseScale*(2.1+tk.ring*0.55) + amplitude*30)*ringMul;
     const dir = tk.ring%2===0?1:-1;
     const ang = tk.a + t*(0.15+tk.ring*0.08)*dir;
     const x = cx()+Math.cos(ang)*rad;
@@ -225,6 +391,23 @@ function draw(){
     ctx.fill();
     ctx.shadowBlur = 0;
   });
+
+  if(isThinking){
+    const outerIdx = ringCount - 1;
+    const outerRad = (baseScale*(2.1+outerIdx*0.55) + amplitude*30)*ringMul;
+    const tickFlash = now < thinkingTickFlashUntil;
+    const tickSize = (2.6 + amplitude*2.2) * (tickFlash ? 1.5 : 1);
+    const tickAlpha = tickFlash ? 1 : 0.82 + amplitude*0.15;
+    const tx = cx() + Math.cos(thinkingTickAngle) * outerRad;
+    const ty = cy() + Math.sin(thinkingTickAngle) * outerRad * 0.42;
+    ctx.beginPath();
+    ctx.arc(tx, ty, tickSize, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(255,255,255,${tickAlpha})`;
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = tickFlash ? 18 : 10;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+  }
 
   // ambient dust field, drifting slowly, flickers brighter with amplitude
   dust.forEach(d=>{
@@ -249,28 +432,50 @@ function draw(){
   edges.forEach(e=>{
     const a=projected[e.a], b=projected[e.b];
     const depth = (a.s+b.s)/2;
-    ctx.strokeStyle = `rgba(255,255,255,${0.12+depth*0.15+amplitude*0.25})`;
+    ctx.strokeStyle = `rgba(255,255,255,${(0.12+depth*0.15+amplitude*0.25)*glowMul})`;
     ctx.beginPath();
     ctx.moveTo(a.x,a.y);
     ctx.lineTo(b.x,b.y);
     ctx.stroke();
   });
   projected.forEach(p=>{
+    const ptRadius = Math.max(0, 1.4*p.s);
+    if(ptRadius <= 0) return;
     ctx.beginPath();
-    ctx.arc(p.x,p.y,1.4*p.s,0,Math.PI*2);
-    ctx.fillStyle = `rgba(255,255,255,${0.4+amplitude*0.5})`;
+    ctx.arc(p.x,p.y,ptRadius,0,Math.PI*2);
+    ctx.fillStyle = `rgba(255,255,255,${(0.4+amplitude*0.5)*glowMul})`;
     ctx.fill();
   });
 
   // glowing core
   const grad = ctx.createRadialGradient(cx(),cy(),0,cx(),cy(),coreScale*0.9);
-  grad.addColorStop(0, `rgba(255,255,255,${0.9})`);
-  grad.addColorStop(0.25, `rgba(255,255,255,${0.55+amplitude*0.3})`);
+  grad.addColorStop(0, `rgba(255,255,255,${0.9*glowMul})`);
+  grad.addColorStop(0.25, `rgba(255,255,255,${(0.55+amplitude*0.3)*glowMul})`);
   grad.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = grad;
   ctx.beginPath();
   ctx.arc(cx(),cy(),coreScale*0.55*(1+amplitude*0.4),0,Math.PI*2);
   ctx.fill();
+
+  if(successPing.active){
+    const pingElapsed = now - successPing.start;
+    const pingDur = 500;
+    if(pingElapsed >= pingDur){
+      successPing.active = false;
+    } else {
+      const u = pingElapsed / pingDur;
+      const pingR = successPing.startR + (successPing.endR - successPing.startR) * u;
+      const pingAlpha = 0.8 * (1 - u);
+      ctx.beginPath();
+      ctx.arc(cx(), cy(), pingR, 0, Math.PI*2);
+      ctx.strokeStyle = `rgba(255,255,255,${pingAlpha})`;
+      ctx.lineWidth = 1.2 + (1 - u) * 0.8;
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 12 * (1 - u);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+  }
 
   // particle bursts on amplitude spikes — denser, with size/speed variance
   const burstChance = 0.15+amplitude*0.85;
@@ -291,10 +496,30 @@ function draw(){
   }
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i];
+    if(p.type === 'fail'){
+      p.x += p.vx;
+      p.y += p.vy;
+      const decay = 0.016 / (p.maxLife || 1.8);
+      p.life -= decay;
+      if(p.life <= 0 || p.y > canvas.height + 12){
+        particles.splice(i,1);
+        continue;
+      }
+      const flicker = 0.3 + Math.random() * 0.55;
+      const failRadius = Math.max(0, p.size * p.life);
+      if(failRadius <= 0) continue;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, failRadius, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(255,255,255,${Math.max(0, p.life * flicker)})`;
+      ctx.fill();
+      continue;
+    }
     p.x+=p.vx; p.y+=p.vy; p.vx*=0.99; p.vy*=0.99; p.life-=0.018;
     if(p.life<=0){particles.splice(i,1);continue;}
+    const burstRadius = Math.max(0, p.size*p.life);
+    if(burstRadius <= 0) continue;
     ctx.beginPath();
-    ctx.arc(p.x,p.y,p.size*p.life,0,Math.PI*2);
+    ctx.arc(p.x,p.y,burstRadius,0,Math.PI*2);
     ctx.fillStyle=`rgba(255,255,255,${p.life})`;
     ctx.shadowColor='#ffffff';
     ctx.shadowBlur = 4;
@@ -304,15 +529,135 @@ function draw(){
 }
 draw();
 
+// ---- UI SFX (separate from sage-audio / AnalyserNode) ----
+const SFX_VOLUME = 0.45;
+const sfxElements = {
+  startup: document.getElementById('sfx-startup'),
+  overlayAppear: document.getElementById('sfx-overlay-appear'),
+  coreOpen: document.getElementById('sfx-core-open'),
+  coreClose: document.getElementById('sfx-core-close'),
+  interfaceClick: document.getElementById('sfx-interface-click'),
+  thinking: document.getElementById('sfx-thinking'),
+};
+const sfxFiles = {
+  startup: '../assets/sfx/Startup.wav',
+  overlayAppear: '../assets/sfx/Overlay_apear.wav',
+  coreOpen: '../assets/sfx/core_UI_open.wav',
+  coreClose: '../assets/sfx/Core_UI_Close.wav',
+  interfaceClick: '../assets/sfx/interface click.wav',
+  thinking: '../assets/sfx/AI_Thinking_idle.wav',
+};
+const uiSfx = sfxElements;
+const uiSfxSrc = sfxFiles;
+const THINKING_SFX_VOLUME = 0.38;
+let thinkingFadeTimer = null;
+Object.keys(uiSfx).forEach(key=>{
+  uiSfx[key].volume = SFX_VOLUME;
+  uiSfx[key].src = uiSfxSrc[key];
+});
+
+function stopThinkingSfx(fadeMs = 250){
+  const el = uiSfx.thinking;
+  if(!el) return;
+  if(thinkingFadeTimer){
+    clearInterval(thinkingFadeTimer);
+    thinkingFadeTimer = null;
+  }
+  if(el.paused){ el.loop = false; return; }
+  const startVol = el.volume;
+  const steps = Math.max(1, Math.floor(fadeMs / 40));
+  let step = 0;
+  thinkingFadeTimer = setInterval(()=>{
+    step += 1;
+    el.volume = Math.max(0, startVol * (1 - step / steps));
+    if(step >= steps){
+      clearInterval(thinkingFadeTimer);
+      thinkingFadeTimer = null;
+      el.pause();
+      el.currentTime = 0;
+      el.loop = false;
+      el.volume = THINKING_SFX_VOLUME;
+    }
+  }, fadeMs / steps);
+}
+
+function startThinkingSfx(){
+  const el = uiSfx.thinking;
+  if(!el) return;
+  if(thinkingFadeTimer){
+    clearInterval(thinkingFadeTimer);
+    thinkingFadeTimer = null;
+  }
+  el.loop = true;
+  el.volume = THINKING_SFX_VOLUME;
+  el.currentTime = 0;
+  el.play().catch(()=>{ el.loop = false; });
+}
+
+window.playUiSfx = (key)=>{
+  const el = uiSfx[key];
+  if(!el) return;
+  if(key === 'thinking'){ startThinkingSfx(); return; }
+  el.volume = SFX_VOLUME;
+  el.currentTime = 0;
+  el.play().catch(()=>{});
+};
+
+(function initOverlayLifecycle(){
+  bootStartTime = performance.now();
+  playUiSfx('startup');
+  requestAnimationFrame(()=>{
+    playUiSfx('overlayAppear');
+    document.getElementById('wrap').classList.add('window-visible');
+  });
+})();
+
 // ---- Audio setup ----
 const modeLabel = document.getElementById('mode');
 const micBtn = document.getElementById('micBtn');
 const demoBtn = document.getElementById('demoBtn');
 const stopBtn = document.getElementById('stopBtn');
 
-function applyMode(m){
+function isEngagedDisplay(m){
+  return m === 'listening' || m === 'speaking' || m === 'thinking';
+}
+
+function internalToDisplayMode(m){
+  if(m === 'mic') return 'listening';
+  if(m === 'speaking') return 'speaking';
+  if(m === 'demo') return 'listening';
+  return 'standby';
+}
+
+function handleDisplayModeTransition(oldM, newM){
+  if(oldM === newM) return;
+
+  if(newM === 'thinking' && oldM !== 'thinking'){
+    startThinkingSfx();
+  }
+  if(oldM === 'thinking' && newM !== 'thinking'){
+    stopThinkingSfx();
+  }
+
+  if(oldM === 'standby' && (newM === 'listening' || newM === 'speaking')){
+    playUiSfx('coreOpen');
+    startRingPulse('open');
+  } else if(newM === 'standby' && isEngagedDisplay(oldM)){
+    playUiSfx('coreClose');
+    startRingPulse('close');
+  }
+}
+
+let prevDisplayMode = 'standby';
+
+function applyMode(m, opts = {}){
+  const newDisplay = internalToDisplayMode(m);
+  if(opts.transition !== false){
+    handleDisplayModeTransition(prevDisplayMode, newDisplay);
+    prevDisplayMode = newDisplay;
+  }
   mode = m;
-  modeLabel.textContent = m==='mic' ? 'LISTENING' : m==='demo' ? 'DEMO MODE' : 'STANDBY';
+  modeLabel.textContent = m==='mic' ? 'LISTENING' : m==='demo' ? 'DEMO MODE' : m==='speaking' ? 'SPEAKING' : 'STANDBY';
   micBtn.classList.toggle('active', m==='mic');
   demoBtn.classList.toggle('active', m==='demo');
 }
@@ -367,10 +712,14 @@ window.setMode = (m) => {
   };
   const internalMode = modeMap[m] || 'standby';
 
-  // If we are in speaking mode, we want to ensure we don't trigger the 'demo' fallback
-  // unless we actually want the fake animation.
-  // We'll update applyMode to handle 'speaking' by not triggering the sine wave.
-  applyMode(internalMode);
+  handleDisplayModeTransition(prevDisplayMode, m);
+  if(prevDisplayMode === 'thinking' && m !== 'thinking'){
+    resetThinkingTick();
+  }
+  prevDisplayMode = m;
+  displayMode = m;
+
+  applyMode(internalMode, { transition: false });
 
   const labels = {
     'standby': 'STANDBY',

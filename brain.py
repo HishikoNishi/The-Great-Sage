@@ -20,6 +20,8 @@ Your job is to classify the user's request into exactly ONE of two types:
    You must return a JSON object with:
    - "type": "answer"
    - "text": Your concise, helpful response in English.
+   When responding to greetings or casual check-ins, refer to the user as
+   "master" in your answer content (e.g. "Hello, master. How can I help you?").
 
 Available Intent IDs:
 - open_explorer
@@ -32,12 +34,10 @@ Available Intent IDs:
 - system_reset
 - close_app
 - force_close
-- greeting
 
 Constraints:
 - Only use the provided intent IDs.
 - ALWAYS respond in valid JSON format.
-- If the user says "hello" or "good morning", use "greeting".
 """
 
 class Brain:

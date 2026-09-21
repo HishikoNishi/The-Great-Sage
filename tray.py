@@ -9,10 +9,17 @@ logger = logging.getLogger("great_sage.tray")
 class TrayManager:
     """Manages the system tray icon and control menu."""
 
-    def __init__(self, on_listen: Callable, on_pause: Callable, on_quit: Callable):
+    def __init__(
+        self,
+        on_listen: Callable,
+        on_pause: Callable,
+        on_quit: Callable,
+        on_menu_click: Callable | None = None,
+    ):
         self.on_listen = on_listen
         self.on_pause = on_pause
         self.on_quit = on_quit
+        self.on_menu_click = on_menu_click
         self.icon = None
         self.running = False
 
@@ -41,14 +48,19 @@ class TrayManager:
         self.running = True
         logger.info("System tray icon started.")
 
+    def _menu_action(self, action: Callable):
+        if self.on_menu_click:
+            self.on_menu_click()
+        action()
+
     def _on_listen_clicked(self, icon, item):
-        self.on_listen()
+        self._menu_action(self.on_listen)
 
     def _on_pause_clicked(self, icon, item):
-        self.on_pause()
+        self._menu_action(self.on_pause)
 
     def _on_quit_clicked(self, icon, item):
-        self.on_quit()
+        self._menu_action(self.on_quit)
 
     def stop(self):
         """Stop the tray icon."""

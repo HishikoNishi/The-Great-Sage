@@ -22,6 +22,7 @@ FISH_MODEL = os.getenv("FISH_MODEL", "")
 HOTKEY = os.getenv("HOTKEY", "ctrl+alt+s")
 INTENTS_FILE = BASE_DIR / os.getenv("INTENTS_FILE", "intents.yaml")
 AUDIO_DIR = BASE_DIR / os.getenv("AUDIO_DIR", "voice_lines")
+SFX_DIR = BASE_DIR / os.getenv("SFX_DIR", "assets/sfx")
 
 # Overlay Settings
 OVERLAY_FILE = BASE_DIR / os.getenv("OVERLAY_FILE", "overlay/great-sage-core.html")

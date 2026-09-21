@@ -33,7 +33,8 @@ class GreatSageApp:
         self.tray = TrayManager(
             on_listen=self.trigger_listen,
             on_pause=self.toggle_pause,
-            on_quit=self.quit_app
+            on_quit=self.quit_app,
+            on_menu_click=lambda: overlay.play_ui_sfx("interfaceClick"),
         )
 
     def trigger_listen(self):
@@ -85,6 +86,10 @@ class GreatSageApp:
             if not result:
                 logger.error("Brain failed to classify request.")
                 logger.info(f"[TIMING] Brain classification: {brain_duration:.2f}s")
+                try:
+                    overlay.trigger_failure()
+                except Exception:
+                    pass
                 overlay.set_caption("I'm having trouble thinking right now.")
                 self.reset_to_standby()
                 return
@@ -102,10 +107,23 @@ class GreatSageApp:
                     action_params = intent_cfg.get('params', {})
                     action_params.update(params)
 
-                    executor.execute(action_name, action_params)
+                    action_ok = executor.execute(action_name, action_params)
+                    if not action_ok:
+                        try:
+                            overlay.trigger_failure()
+                        except Exception:
+                            pass
+                        overlay.set_caption("That action could not be completed.")
+                        self.reset_to_standby()
+                        return
 
                     voice_file = intent_cfg.get('audio_file')
                     caption = intent_cfg.get('caption', "")
+
+                    try:
+                        overlay.trigger_success()
+                    except Exception:
+                        pass
 
                     overlay.set_mode('speaking')
                     overlay.set_caption(caption)
@@ -126,11 +144,22 @@ class GreatSageApp:
                             overlay.set_caption(f"Audio missing: {voice_file}")
                 else:
                     logger.warning(f"Intent {intent_id} not found in registry.")
+                    try:
+                        overlay.trigger_failure()
+                    except Exception:
+                        pass
                     overlay.set_caption(f"I don't know how to perform {intent_id}.")
 
             elif result.get("type") == "answer":
                 answer_text = result.get("text", "")
-                overlay.set_mode('speaking')
+
+                # Defensive re-confirmation that we are still in thinking mode
+                # during translation and synthesis stages.
+                try:
+                    overlay.set_mode('thinking')
+                except Exception:
+                    pass
+
                 overlay.set_caption(answer_text)
 
                 try:
@@ -156,15 +185,27 @@ class GreatSageApp:
                     play_start = time.time()
                     overlay.play_voice_line(str(audio_path))
                     logger.info(f"[TIMING] Overlay playback trigger: {time.time() - play_start:.2f}s")
+                    try:
+                        overlay.trigger_success()
+                    except Exception:
+                        pass
 
                 except Exception as e:
                     logger.error(f"Dynamic voice pipeline failed: {e}")
+                    try:
+                        overlay.trigger_failure()
+                    except Exception:
+                        pass
                     time.sleep(3)
 
                 time.sleep(3)
 
         except Exception as e:
             logger.exception(f"Error in listen loop: {e}")
+            try:
+                overlay.trigger_failure()
+            except Exception:
+                pass
             overlay.set_caption("An unexpected error occurred.")
 
         finally:
@@ -212,6 +253,11 @@ class GreatSageApp:
         self.tray.stop()
         os._exit(0)
 
+    def on_overlay_ready(self):
+        """Called by pywebview once the GUI loop is live and the window is ready."""
+        logger.info("Overlay ready — registering hotkey.")
+        self.setup_hotkey()
+
     def run(self):
         """Launches all components. webview.start() MUST be on the main thread."""
         logger.info("Starting Great Sage Assistant...")
@@ -219,15 +265,11 @@ class GreatSageApp:
         # 1. Start Tray in background thread
         self.tray.start()
 
-        # 2. Start Hotkey listener in background thread
-        self.setup_hotkey()
-
-        # 3. Initialize Overlay
+        # 2. Create overlay window (does not start the event loop yet)
         overlay.start()
 
-        # 4. Launch webview.start() on the main thread (Blocking call)
-        # This is required by pywebview
-        overlay.run()
+        # 3. Block on main thread; on_ready runs when webview can serve evaluate_js
+        overlay.run(on_ready=self.on_overlay_ready)
 
     def quit_app(self):
         logger.info("Quitting Great Sage...")
