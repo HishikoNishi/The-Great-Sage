@@ -41,6 +41,16 @@
     text-align:center;font-size:14px;letter-spacing:1px;
     color:var(--cyan);min-height:20px;opacity:0.9;
     text-shadow:0 0 8px rgba(255,255,255,0.6);
+    transition:opacity .22s ease, transform .22s ease;
+  }
+  #transcript:not(:empty){animation:caption-in .28s ease-out both;}
+  @keyframes caption-in{
+    from{opacity:0;transform:translateY(5px);}
+    to{opacity:.9;transform:translateY(0);}
+  }
+  @media (prefers-reduced-motion: reduce){
+    #wrap{transition:none;}
+    #transcript:not(:empty){animation:none;}
   }
   #controls{
     position:absolute;bottom:24px;display:none;gap:12px;
@@ -76,6 +86,9 @@
   <audio id="sfx-core-close" preload="auto" style="display:none;"></audio>
   <audio id="sfx-interface-click" preload="auto" style="display:none;"></audio>
   <audio id="sfx-thinking" preload="auto" style="display:none;"></audio>
+  <audio id="sfx-fail" preload="auto" style="display:none;"></audio>
+  <audio id="sfx-crack" preload="auto" style="display:none;"></audio>
+  <audio id="sfx-shatter" preload="auto" style="display:none;"></audio>
   <div id="controls">
     <button id="micBtn" style="fill-opacity: 0;">MIC</button>
     <button id="demoBtn">DEMO</button>
@@ -100,6 +113,7 @@ resize(); addEventListener('resize', resize);
 
 const cx = () => canvas.width/2;
 const cy = () => canvas.height/2;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---- Icosahedron-ish point cloud (approx via fibonacci sphere) ----
 const N = 42;
@@ -110,6 +124,7 @@ for(let i=0;i<N;i++){
   const theta = Math.PI*(3-Math.sqrt(5))*i;
   pts.push({x:Math.cos(theta)*r, y:y, z:Math.sin(theta)*r});
 }
+const disp = pts.map(()=>({x:0,y:0,z:0, vx:0,vy:0,vz:0}));
 const ptRest = pts.map(p=>({x:p.x,y:p.y,z:p.z}));
 const ptBootFrom = pts.map(p=>{
   const mag = 2.4 + Math.random()*2.2;
@@ -166,13 +181,31 @@ let amplitude=0, targetAmp=0;
 let mode = 'standby'; // standby, mic, demo
 let analyser=null, dataArray=null, audioCtx=null, stream=null;
 const particles = [];
+const orbits = [
+  {radius:2.3, tilt:0.15, speed:0.9, n:2},
+  {radius:2.9, tilt:-0.35, speed:0.6, n:3},
+  {radius:3.5, tilt:0.5, speed:0.4, n:1},
+];
+const electrons = [];
+orbits.forEach((o,oi)=>{
+  for(let i=0;i<o.n;i++){
+    electrons.push({
+      orbit:oi,
+      angle: (i/o.n)*Math.PI*2,
+      escaped:false,
+      ex:0, ey:0, evx:0, evy:0, life:1
+    });
+  }
+});
+
 
 let displayMode = 'standby';
 let thinkingTickAngle = 0;
+let thinkingTickTargetAngle = 0;
 let thinkingTickLastStep = 0;
 let thinkingTickFlashUntil = 0;
-const THINKING_TICK_STEP_MS = 400;
-const THINKING_TICK_INCREMENT = Math.PI / 6;
+const THINKING_TICK_STEP_MS = 520;
+const THINKING_TICK_INCREMENT = Math.PI / 4;
 
 let outcomeGlowMultiplier = 1;
 let outcomeGlowTarget = 1;
@@ -186,10 +219,24 @@ const successPing = {
   pendingScale: false,
 };
 
+const CRACK_GROWTH_MS = 520;
+
+const failureFx = {
+  active: false,
+  phase: 'idle', // idle, destabilize, recover
+  phaseStarted: 0,
+  scanGlitch: [],
+};
+
 function resetThinkingTick(){
   thinkingTickAngle = 0;
+  thinkingTickTargetAngle = 0;
   thinkingTickLastStep = 0;
   thinkingTickFlashUntil = 0;
+}
+
+function shortestAngle(from, to){
+  return Math.atan2(Math.sin(to-from), Math.cos(to-from));
 }
 
 function updateOutcomeGlow(now){
@@ -217,11 +264,92 @@ function spawnFailureParticles(){
   }
 }
 
+function createCracks(){
+  const crackCount = 3 + Math.floor(Math.random() * 3);
+  const minGap = Math.PI / 5;
+  const baseAngles = [];
+  let attempts = 0;
+  while(baseAngles.length < crackCount && attempts < 100){
+    attempts += 1;
+    const candidate = Math.random() * Math.PI * 2;
+    const spaced = baseAngles.every(a=>{
+      const diff = Math.abs(Math.atan2(Math.sin(candidate - a), Math.cos(candidate - a)));
+      return diff >= minGap;
+    });
+    if(spaced) baseAngles.push(candidate);
+  }
+
+  failureFx.scanGlitch = Array.from({length: 1 + Math.floor(Math.random() * 2)}, (_, i)=>({
+    yNorm: (Math.random() - 0.5) * 0.28,
+    phase: Math.random() * Math.PI * 2 + i * 1.7,
+  }));
+
+  failureFx.cracks = baseAngles.map(baseAngle=>{
+    const points = [{angle: baseAngle, radius: 0.06}];
+    let angle = baseAngle;
+    for(let step = 1; step <= 4; step++){
+      angle += (Math.random() - 0.5) * 0.02;
+      points.push({
+        angle,
+        radius: 0.1 + step * (0.088 + Math.random() * 0.022),
+      });
+    }
+    return points;
+  });
+}
+
+function setFailurePhase(phase){
+  failureFx.phase = phase;
+  failureFx.phaseStarted = performance.now();
+  if(phase === 'crack') createCracks();
+  if(phase === 'shatter' && !reduceMotion) spawnShatterParticles();
+}
+
+function spawnShatterParticles(){
+  // Removed in favor of structural destabilization
+}
+
 window.triggerFailure = ()=>{
   const now = performance.now();
-  outcomeGlowTarget = 0.4;
-  outcomeGlowUntil = now + 600;
-  spawnFailureParticles();
+  outcomeGlowTarget = 0.7;
+  outcomeGlowUntil = now + 900;
+  failureFx.active = true;
+  failureFx.phase = 'destabilize';
+  failureFx.phaseStarted = now;
+  failureFx.scanGlitch = Array.from({length: 1 + Math.floor(Math.random() * 2)}, (_, i)=>({
+    yNorm: (Math.random() - 0.5) * 0.28,
+    phase: Math.random() * Math.PI * 2 + i * 1.7,
+  }));
+  playUiSfx('fail');
+
+  // Polyhedron kick
+  pts.forEach((p,i)=>{
+    const kick = 0.35 + Math.random()*0.55;
+    disp[i].vx = p.x * kick * (0.6 + Math.random()*0.6);
+    disp[i].vy = p.y * kick * (0.6 + Math.random()*0.6);
+    disp[i].vz = p.z * kick * (0.6 + Math.random()*0.6);
+  });
+
+  // Electron escape
+  const escapeCount = 2 + Math.floor(Math.random()*2);
+  const shuffled = [...electrons].sort(()=>Math.random()-0.5);
+  shuffled.slice(0,escapeCount).forEach(e=>{
+    e.escaped = true;
+    e.life = 1;
+    const o = orbits[e.orbit];
+    const baseX = Math.cos(e.angle)*o.radius;
+    const baseY = Math.sin(e.angle)*o.radius*Math.cos(o.tilt)*0.5;
+    e.ex = baseX; e.ey = baseY;
+    const tangentAngle = e.angle + Math.PI/2 + (Math.random()-0.5)*0.6;
+    const spd = 2 + Math.random()*3;
+    e.evx = Math.cos(tangentAngle)*spd;
+    e.evy = Math.sin(tangentAngle)*spd*0.6;
+  });
+
+  setTimeout(()=>{
+    failureFx.phase = 'recover';
+    failureFx.phaseStarted = performance.now();
+  }, 700);
 };
 
 window.triggerSuccess = ()=>{
@@ -271,11 +399,46 @@ function project(p, scale, dist){
 }
 
 let t=0;
-function draw(){
-  requestAnimationFrame(draw);
-  t += 0.016;
+let lastFrameTime = performance.now();
 
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+function motionProfile(){
+  if(displayMode === 'speaking') return {breath:0.065, spin:1.35, flow:1.5};
+  if(displayMode === 'listening') return {breath:0.045, spin:1.08, flow:1.2};
+  if(displayMode === 'thinking') return {breath:0.08, spin:0.52, flow:1.75};
+  return {breath:0.028, spin:0.7, flow:0.55};
+}
+
+function updateFailureFx(now){
+  if(failureFx.phase === 'recover' && now-failureFx.phaseStarted > 900){
+    failureFx.active = false;
+    failureFx.phase = 'idle';
+    electrons.forEach(e=>{ e.escaped=false; e.life=1; });
+  }
+}
+
+function failureCoreMultiplier(now){
+  if(!failureFx.active) return 1;
+  const elapsed = now-failureFx.phaseStarted;
+  if(failureFx.phase === 'destabilize') return 0.7 + 0.1*Math.abs(Math.sin(elapsed*0.02));
+  if(failureFx.phase === 'recover') return Math.min(1, 0.7 + elapsed/900);
+  return 1;
+}
+
+function drawFailureCracks(now, coreScale){
+  // Removed in favor of Structural Destabilization
+}
+
+function draw(now = performance.now()){
+  requestAnimationFrame(draw);
+  const dt = Math.min(50, Math.max(0, now-lastFrameTime));
+  lastFrameTime = now;
+  const seconds = dt/1000;
+  const frame = reduceMotion ? 0 : dt/(1000/60);
+  if(!reduceMotion) t += seconds;
+
+  // Keep the soft after-image, independent of monitor refresh rate.
+  const trailAlpha = 1-Math.pow(0.65, Math.max(frame, 1));
+  ctx.fillStyle = `rgba(0,0,0,${trailAlpha})`;
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
   // read audio amplitude
@@ -292,7 +455,8 @@ function draw(){
   } else {
     targetAmp *= 0.9;
   }
-  amplitude += (targetAmp-amplitude)*0.25;
+  const ampSmoothing = 1-Math.pow(0.75, Math.max(frame, 1));
+  amplitude += (targetAmp-amplitude)*ampSmoothing;
   document.getElementById('amp').textContent = amplitude.toFixed(2);
 
   if(bootActive){
@@ -317,15 +481,18 @@ function draw(){
   }
 
   const ringMul = updateRingPulse();
+  const profile = motionProfile();
+  const breathe = 1 + (Math.sin(t*(displayMode === 'thinking' ? 2.5 : 1.65)) * profile.breath);
   const spinMul = bootActive ? 0.15 + bootGlow*0.85 : 1;
-  angleY += (0.004 + amplitude*0.02)*spinMul;
-  angleX += 0.0015*spinMul;
+  angleY += (0.004 + amplitude*0.02)*spinMul*profile.spin*frame;
+  angleX += 0.0015*spinMul*(0.8+profile.spin*0.2)*frame;
 
   const baseScale = Math.min(canvas.width, canvas.height)*0.16;
-  const coreScale = baseScale*(1+amplitude*0.55);
-  const now = performance.now();
+  const coreScale = baseScale*breathe*(1+amplitude*0.55);
+  updateFailureFx(now);
   updateOutcomeGlow(now);
   const glowMul = bootGlow * outcomeGlowMultiplier;
+  const coreGlowMul = glowMul * failureCoreMultiplier(now);
 
   if(successPing.pendingScale){
     successPing.startR = coreScale * 0.6;
@@ -333,14 +500,18 @@ function draw(){
     successPing.pendingScale = false;
   }
 
-  const isThinking = displayMode === 'thinking';
+  const isThinking = displayMode === 'thinking' && !reduceMotion;
   if(isThinking){
     if(!thinkingTickLastStep) thinkingTickLastStep = now;
     if(now - thinkingTickLastStep >= THINKING_TICK_STEP_MS){
-      thinkingTickAngle += THINKING_TICK_INCREMENT;
-      thinkingTickLastStep = now;
-      thinkingTickFlashUntil = now + 100;
+      const steps = Math.floor((now-thinkingTickLastStep)/THINKING_TICK_STEP_MS);
+      thinkingTickTargetAngle += THINKING_TICK_INCREMENT*steps;
+      thinkingTickLastStep += THINKING_TICK_STEP_MS*steps;
+      thinkingTickFlashUntil = now + 140;
     }
+    // The scanner eases into each new sector, rather than snapping around the ring.
+    const scanEase = 1-Math.pow(0.0008, seconds);
+    thinkingTickAngle += shortestAngle(thinkingTickAngle, thinkingTickTargetAngle)*scanEase;
   } else if(thinkingTickLastStep){
     resetThinkingTick();
   }
@@ -351,9 +522,7 @@ function draw(){
     const rad = (baseScale*(2.1+r*0.55) + amplitude*30)*ringMul;
     ctx.save();
     ctx.translate(cx(),cy());
-    const ringSpin = isThinking && r === ringCount - 1
-      ? thinkingTickAngle
-      : t*(0.15+r*0.08)*(r%2===0?1:-1);
+    const ringSpin = t*(0.15+r*0.08)*profile.spin*(r%2===0?1:-1);
     ctx.rotate(ringSpin);
     ctx.beginPath();
     const segs=64;
@@ -366,7 +535,7 @@ function draw(){
       if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
     }
     ctx.closePath();
-    const ringAlpha = (0.15+amplitude*0.5-r*0.04)*glowMul;
+    const ringAlpha = (0.06+amplitude*0.55-r*0.02)*glowMul;
     ctx.strokeStyle = `rgba(255,255,255,${ringAlpha})`;
     ctx.lineWidth = 1+amplitude*1.5;
     ctx.shadowColor='#ffffff';
@@ -377,10 +546,10 @@ function draw(){
 
   // ring-hugging tick particles (data pulses running along the rings)
   ticks.forEach(tk=>{
-    tk.a += tk.speed*0.02*(1+amplitude*3);
+    tk.a += tk.speed*1.25*seconds*(1+amplitude*3)*profile.flow;
     const rad = (baseScale*(2.1+tk.ring*0.55) + amplitude*30)*ringMul;
     const dir = tk.ring%2===0?1:-1;
-    const ang = tk.a + t*(0.15+tk.ring*0.08)*dir;
+    const ang = tk.a + t*(0.15+tk.ring*0.08)*profile.spin*dir;
     const x = cx()+Math.cos(ang)*rad;
     const y = cy()+Math.sin(ang)*rad*0.42;
     ctx.beginPath();
@@ -400,6 +569,29 @@ function draw(){
     const tickAlpha = tickFlash ? 1 : 0.82 + amplitude*0.15;
     const tx = cx() + Math.cos(thinkingTickAngle) * outerRad;
     const ty = cy() + Math.sin(thinkingTickAngle) * outerRad * 0.42;
+
+    // A restrained diagnostic beam connects the core to the sector being evaluated.
+    const beam = ctx.createLinearGradient(cx(), cy(), tx, ty);
+    beam.addColorStop(0, 'rgba(255,255,255,0)');
+    beam.addColorStop(0.55, `rgba(255,255,255,${0.1+amplitude*0.12})`);
+    beam.addColorStop(1, `rgba(255,255,255,${0.45+amplitude*0.2})`);
+    ctx.beginPath();
+    ctx.moveTo(cx(), cy());
+    ctx.lineTo(tx, ty);
+    ctx.strokeStyle = beam;
+    ctx.lineWidth = 0.8 + amplitude*0.6;
+    ctx.stroke();
+
+    // The fading dots make the scanner direction legible without adding visual noise.
+    for(let i=4;i>0;i--){
+      const tailAngle = thinkingTickAngle - i*0.13;
+      const tailX = cx() + Math.cos(tailAngle)*outerRad;
+      const tailY = cy() + Math.sin(tailAngle)*outerRad*0.42;
+      ctx.beginPath();
+      ctx.arc(tailX, tailY, Math.max(0.8, tickSize*(1-i*0.16)), 0, Math.PI*2);
+      ctx.fillStyle = `rgba(255,255,255,${0.08+(4-i)*0.09})`;
+      ctx.fill();
+    }
     ctx.beginPath();
     ctx.arc(tx, ty, tickSize, 0, Math.PI*2);
     ctx.fillStyle = `rgba(255,255,255,${tickAlpha})`;
@@ -411,7 +603,7 @@ function draw(){
 
   // ambient dust field, drifting slowly, flickers brighter with amplitude
   dust.forEach(d=>{
-    d.a += d.speed*0.01;
+    d.a += d.speed*0.625*seconds*(0.65+profile.flow*0.35);
     const rad = baseScale*d.r*(1+amplitude*0.15);
     const x = cx()+Math.cos(d.a)*rad;
     const y = cy()+Math.sin(d.a)*rad*0.5;
@@ -422,17 +614,77 @@ function draw(){
     ctx.fill();
   });
 
-  // wireframe sphere (icosphere-like)
-  const projected = pts.map(p=>{
-    const rp = rotate(p, angleX, angleY);
-    return project(rp, coreScale, 4);
-  });
+// --- Polyhedron physics integration ---
+pts.forEach((p,i)=>{
+  const d = disp[i];
+  if(failureFx.phase === 'destabilize'){
+    d.x += d.vx * 0.35; d.y += d.vy * 0.35; d.z += d.vz * 0.35;
+    d.vx *= 0.94; d.vy *= 0.94; d.vz *= 0.94;
+  } else if(failureFx.phase === 'recover'){
+    const k=0.08, damp=0.82;
+    d.vx += -d.x * k; d.vy += -d.y * k; d.vz += -d.z * k;
+    d.vx *= damp; d.vy *= damp; d.vz *= damp;
+    d.x += d.vx; d.y += d.vy; d.z += d.vz;
+  }
+});
 
+const animated = pts.map((p,i)=>({
+  x: p.x + disp[i].x, y: p.y + disp[i].y, z: p.z + disp[i].z
+}));
+
+const projected = animated.map(p=>project(rotate(p,angleX,angleY), coreScale, 4));
+
+// --- Bohr orbit rings (faint) ---
+orbits.forEach(o=>{
+  ctx.save();
+  ctx.translate(cx(),cy());
+  ctx.rotate(o.tilt + t*0.1);
+  ctx.beginPath();
+  for(let i=0;i<=48;i++){
+    const a=(i/48)*Math.PI*2;
+    const x=Math.cos(a)*o.radius*baseScale;
+    const y=Math.sin(a)*o.radius*baseScale*0.5;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.closePath();
+    ctx.strokeStyle='rgba(255,255,255,0.035)';
+  ctx.lineWidth=1;
+  ctx.stroke();
+  ctx.restore();
+});
+
+// --- Electrons ---
+electrons.forEach(e=>{
+  const o=orbits[e.orbit];
+  let x,y;
+  if(!e.escaped){
+    e.angle += o.speed*0.02;
+    x = Math.cos(e.angle)*o.radius*baseScale;
+    y = Math.sin(e.angle)*o.radius*Math.cos(o.tilt)*0.5*baseScale;
+    x = cx()+x; y = cy()+y;
+  } else {
+    e.ex += e.evx; e.ey += e.evy;
+    e.evx*=0.985; e.evy*=0.985;
+    e.life -= 0.012;
+    x = cx()+e.ex*baseScale*0.5; y = cy()+e.ey*baseScale*0.5;
+    if(e.life<=0) return;
+  }
+  const alpha = e.escaped ? Math.max(0,e.life) : 0.85;
+  const size = e.escaped ? 2.2*Math.max(0,e.life) : 2.4;
+  ctx.beginPath();
+  ctx.arc(x,y,size,0,Math.PI*2);
+  ctx.fillStyle=`rgba(255,255,255,${alpha})`;
+  ctx.shadowColor='#fff'; ctx.shadowBlur = e.escaped?8:4;
+  ctx.fill();
+  ctx.shadowBlur=0;
+});
+
+// wireframe polyhedron
   ctx.lineWidth = 1;
   edges.forEach(e=>{
     const a=projected[e.a], b=projected[e.b];
     const depth = (a.s+b.s)/2;
-    ctx.strokeStyle = `rgba(255,255,255,${(0.12+depth*0.15+amplitude*0.25)*glowMul})`;
+    ctx.strokeStyle = `rgba(255,255,255,${(0.12+depth*0.15+amplitude*0.25)*coreGlowMul})`;
     ctx.beginPath();
     ctx.moveTo(a.x,a.y);
     ctx.lineTo(b.x,b.y);
@@ -443,19 +695,31 @@ function draw(){
     if(ptRadius <= 0) return;
     ctx.beginPath();
     ctx.arc(p.x,p.y,ptRadius,0,Math.PI*2);
-    ctx.fillStyle = `rgba(255,255,255,${(0.4+amplitude*0.5)*glowMul})`;
+    ctx.fillStyle = `rgba(255,255,255,${(0.4+amplitude*0.5)*coreGlowMul})`;
     ctx.fill();
   });
 
   // glowing core
   const grad = ctx.createRadialGradient(cx(),cy(),0,cx(),cy(),coreScale*0.9);
-  grad.addColorStop(0, `rgba(255,255,255,${0.9*glowMul})`);
-  grad.addColorStop(0.25, `rgba(255,255,255,${(0.55+amplitude*0.3)*glowMul})`);
+  grad.addColorStop(0, `rgba(255,255,255,${0.9*coreGlowMul})`);
+  grad.addColorStop(0.25, `rgba(255,255,255,${(0.55+amplitude*0.3)*coreGlowMul})`);
   grad.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = grad;
   ctx.beginPath();
   ctx.arc(cx(),cy(),coreScale*0.55*(1+amplitude*0.4),0,Math.PI*2);
   ctx.fill();
+
+  // System fault glitch: brief horizontal displacement bands
+  if(failureFx.active && failureFx.phase !== 'idle'){
+    failureFx.scanGlitch.forEach(glitch=>{
+      const glitchOffset = Math.sin(now * 0.02 + glitch.phase) * 4;
+      const glitchAlpha = (failureFx.phase === 'recover') ? 0 : 0.15;
+      ctx.fillStyle = `rgba(255,255,255,${glitchAlpha})`;
+      const yPos = cy() + glitch.yNorm * coreScale * 2;
+      ctx.fillRect(cx() - coreScale * 2 + glitchOffset, yPos, coreScale * 4, 1);
+    });
+  }
+
 
   if(successPing.active){
     const pingElapsed = now - successPing.start;
@@ -478,8 +742,8 @@ function draw(){
   }
 
   // particle bursts on amplitude spikes — denser, with size/speed variance
-  const burstChance = 0.15+amplitude*0.85;
-  if(amplitude>0.12 && Math.random()<burstChance){
+  const burstChance = 1-Math.pow(1-(0.15+amplitude*0.85), Math.max(frame, 1));
+  if(!reduceMotion && amplitude>0.12 && Math.random()<burstChance){
     const bursts = 1+Math.floor(amplitude*4);
     for(let b=0;b<bursts;b++){
       const a = Math.random()*Math.PI*2;
@@ -496,25 +760,25 @@ function draw(){
   }
   for(let i=particles.length-1;i>=0;i--){
     const p=particles[i];
-    if(p.type === 'fail'){
-      p.x += p.vx;
-      p.y += p.vy;
-      const decay = 0.016 / (p.maxLife || 1.8);
-      p.life -= decay;
-      if(p.life <= 0 || p.y > canvas.height + 12){
-        particles.splice(i,1);
-        continue;
-      }
-      const flicker = 0.3 + Math.random() * 0.55;
-      const failRadius = Math.max(0, p.size * p.life);
-      if(failRadius <= 0) continue;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, failRadius, 0, Math.PI*2);
-      ctx.fillStyle = `rgba(255,255,255,${Math.max(0, p.life * flicker)})`;
-      ctx.fill();
+  if(p.type === 'fail'){
+    p.x += p.vx;
+    p.y += p.vy;
+    const decay = 0.016 / (p.maxLife || 1.8);
+    p.life -= decay;
+    if(p.life <= 0 || p.y > canvas.height + 12){
+      particles.splice(i,1);
       continue;
     }
-    p.x+=p.vx; p.y+=p.vy; p.vx*=0.99; p.vy*=0.99; p.life-=0.018;
+    const flicker = 0.3 + Math.random() * 0.55;
+    const failRadius = Math.max(0, p.size * p.life);
+    if(failRadius <= 0) continue;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, failRadius, 0, Math.PI*2);
+    ctx.fillStyle = `rgba(255,255,255,${Math.max(0, p.life * flicker)})`;
+    ctx.fill();
+    continue;
+  }
+    p.x+=p.vx*frame; p.y+=p.vy*frame; p.vx*=Math.pow(0.99,frame); p.vy*=Math.pow(0.99,frame); p.life-=0.018*frame;
     if(p.life<=0){particles.splice(i,1);continue;}
     const burstRadius = Math.max(0, p.size*p.life);
     if(burstRadius <= 0) continue;
@@ -531,6 +795,14 @@ draw();
 
 // ---- UI SFX (separate from sage-audio / AnalyserNode) ----
 const SFX_VOLUME = 0.45;
+const SFX_VOLUME_OVERRIDES = {
+  shatter: 0.14,
+  crack: 0.35,
+  fail: 0.4,
+};
+function getSfxVolume(key){
+  return SFX_VOLUME_OVERRIDES[key] ?? SFX_VOLUME;
+}
 const sfxElements = {
   startup: document.getElementById('sfx-startup'),
   overlayAppear: document.getElementById('sfx-overlay-appear'),
@@ -538,6 +810,9 @@ const sfxElements = {
   coreClose: document.getElementById('sfx-core-close'),
   interfaceClick: document.getElementById('sfx-interface-click'),
   thinking: document.getElementById('sfx-thinking'),
+  fail: document.getElementById('sfx-fail'),
+  crack: document.getElementById('sfx-crack'),
+  shatter: document.getElementById('sfx-shatter'),
 };
 const sfxFiles = {
   startup: '../assets/sfx/Startup.wav',
@@ -546,6 +821,9 @@ const sfxFiles = {
   coreClose: '../assets/sfx/Core_UI_Close.wav',
   interfaceClick: '../assets/sfx/interface click.wav',
   thinking: '../assets/sfx/AI_Thinking_idle.wav',
+  fail: '../assets/sfx/fail.ogg',
+  crack: '../assets/sfx/crack.ogg',
+  shatter: '../assets/sfx/shatter.ogg',
 };
 const uiSfx = sfxElements;
 const uiSfxSrc = sfxFiles;
@@ -594,11 +872,36 @@ function startThinkingSfx(){
   el.play().catch(()=>{ el.loop = false; });
 }
 
+function playSfxUntilEnd(key){
+  const el = uiSfx[key];
+  if(!el) return Promise.resolve();
+  el.pause();
+  el.currentTime = 0;
+  el.loop = false;
+    el.volume = getSfxVolume(key);
+  return new Promise(resolve=>{
+    let settled = false;
+    const done = ()=>{
+      if(settled) return;
+      settled = true;
+      clearTimeout(fallback);
+      resolve();
+    };
+    const fallback = setTimeout(done, 2200);
+    el.addEventListener('ended', done, {once:true});
+    el.play().catch(done);
+  });
+}
+
+async function startFailureSequence(sequence){
+  // Removed in favor of structural destabilization
+}
+
 window.playUiSfx = (key)=>{
   const el = uiSfx[key];
   if(!el) return;
   if(key === 'thinking'){ startThinkingSfx(); return; }
-  el.volume = SFX_VOLUME;
+    el.volume = getSfxVolume(key);
   el.currentTime = 0;
   el.play().catch(()=>{});
 };
@@ -606,10 +909,19 @@ window.playUiSfx = (key)=>{
 (function initOverlayLifecycle(){
   bootStartTime = performance.now();
   playUiSfx('startup');
+  const wrap = document.getElementById('wrap');
+  let revealed = false;
+  const reveal = ()=>{
+    if(revealed) return;
+    revealed = true;
+    wrap.classList.add('window-visible');
+  };
   requestAnimationFrame(()=>{
     playUiSfx('overlayAppear');
-    document.getElementById('wrap').classList.add('window-visible');
+    reveal();
   });
+  // Some WebView hosts delay animation frames while the transparent window is created.
+  setTimeout(reveal, 250);
 })();
 
 // ---- Audio setup ----
@@ -728,31 +1040,9 @@ window.setMode = (m) => {
     'thinking': 'THINKING'
   };
   modeLabel.textContent = labels[m] || 'STANDBY';
-  micBtn.classList.toggle('active', internalMode === 'mic');
-  demoBtn.classList.toggle('active', internalMode === 'demo');
 };
 
 window.setCaption = (text) => {
-  window.currentCaptionText = text;
-  // Only show instantly if we aren't expecting a synced playback
-  // (The logic in playVoiceLine handles the sync, so if we just call setCaption,
-  // we keep it as fallback behavior for no-audio cases)
-  // To prevent "flashing" the full text before the synced reveal,
-  // we should avoid updating the DOM here if we know audio is coming.
-  // However, the requirement says "keep instant reveal as fallback".
-  // The most robust way is to let setCaption set the text, but if a synced reveal
-  // is active or about to start, it might be overwritten.
-  // Let's follow the instruction: "NOT display anything immediately when called before/without audio"
-  // But "keep instant reveal as fallback for cases with no audio".
-  // This is a contradiction. The best approach: setCaption only sets the text variable.
-  // If nothing happens for X ms, or if no playVoiceLine is called, we might need it.
-  // Actually, the user said: "Change window.setCaption(text) to NOT display anything immediately when called before/without audio (keep instant reveal as fallback for cases with no audio, e.g. free-form answers with no voice line, or when playVoiceLine isn't used)."
-  // This means setCaption should just store the text. If playVoiceLine is called, it uses setCaptionSynced.
-  // If setCaption is called and playVoiceLine ISN'T called, the text should eventually appear or be shown via a different path.
-  // Let's implement it as: setCaption stores the text. If we want the fallback, we can't know if audio is "coming" unless we wait.
-  // A better interpretation: setCaption stores the text. If playVoiceLine is called, it handles the reveal.
-  // If the user wants "fallback for cases with no audio", they probably mean that the app logic should still be able to show text.
-  // Let's just store it for now and add a way to trigger the reveal.
   document.getElementById('transcript').textContent = ''; // Clear previous
   window.currentCaptionText = text;
 };
@@ -801,11 +1091,6 @@ window.playVoiceLine = async (url) => {
     };
 
     return new Promise((resolve) => {
-      // Use 'loadedmetadata' to get duration
-      sageAudio.addEventListener('loadedmetadata', () => {
-        // We wait for the 'play' event to actually start the caption reveal
-      });
-
       sageAudio.addEventListener('play', () => {
         if (window.currentCaptionText) {
           window.setCaptionSynced(window.currentCaptionText, sageAudio.duration);
@@ -827,7 +1112,6 @@ window.playVoiceLine = async (url) => {
     window.setCaption("Error playing audio file.");
   }
 };
-
 
 </script>
 </body>

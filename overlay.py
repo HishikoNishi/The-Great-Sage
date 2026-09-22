@@ -12,7 +12,7 @@ except ImportError:
 logger = logging.getLogger("great_sage.overlay")
 
 
-def _format_javascript_exception(exc: JavascriptException) -> str:
+def _format_javascript_exception(exc: Exception) -> str:
     """Extract name/message/stack from pywebview's JavascriptException payload."""
     payload = exc.args[0] if exc.args else None
     if isinstance(payload, dict):
