@@ -15,6 +15,7 @@ Your job is to classify the user's request into exactly ONE of two types:
    - "type": "action"
    - "intent_id": One of the registered intent IDs.
    - "params": A dictionary of parameters for the action.
+   Note: For open_app requests that include a specific website, use {"app_name": "browser", "url": "<the url>"}.
 
 2. "answer": The request is a general question or conversational text.
    You must return a JSON object with:

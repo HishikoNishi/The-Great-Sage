@@ -37,6 +37,28 @@ class GreatSageApp:
             on_menu_click=lambda: overlay.play_ui_sfx("interfaceClick"),
         )
 
+    def handle_failure(self, error_msg: str):
+        """Consistent failure feedback: visual glitch + spoken Japanese response."""
+        logger.info(f"Handling failure: {error_msg}")
+        try:
+            overlay.trigger_failure()
+        except Exception:
+            pass
+
+        overlay.set_caption(error_msg)
+
+        # Attempt spoken feedback
+        try:
+            from translate import to_great_sage_japanese
+            from tts import synthesize_great_sage_voice
+
+            failure_text = "I was unable to complete that action."
+            japanese_text = to_great_sage_japanese(failure_text)
+            audio_path = synthesize_great_sage_voice(japanese_text)
+            overlay.play_voice_line(str(audio_path))
+        except Exception as e:
+            logger.error(f"Failure voice pipeline failed: {e}")
+
     def trigger_listen(self):
         """Triggered by hotkey or tray menu."""
         if self.is_paused:
@@ -86,11 +108,7 @@ class GreatSageApp:
             if not result:
                 logger.error("Brain failed to classify request.")
                 logger.info(f"[TIMING] Brain classification: {brain_duration:.2f}s")
-                try:
-                    overlay.trigger_failure()
-                except Exception:
-                    pass
-                overlay.set_caption("I'm having trouble thinking right now.")
+                self.handle_failure("I'm having trouble thinking right now.")
                 self.reset_to_standby()
                 return
 
@@ -109,11 +127,7 @@ class GreatSageApp:
 
                     action_ok = executor.execute(action_name, action_params)
                     if not action_ok:
-                        try:
-                            overlay.trigger_failure()
-                        except Exception:
-                            pass
-                        overlay.set_caption("That action could not be completed.")
+                        self.handle_failure("That action could not be completed.")
                         self.reset_to_standby()
                         return
 
@@ -144,11 +158,7 @@ class GreatSageApp:
                             overlay.set_caption(f"Audio missing: {voice_file}")
                 else:
                     logger.warning(f"Intent {intent_id} not found in registry.")
-                    try:
-                        overlay.trigger_failure()
-                    except Exception:
-                        pass
-                    overlay.set_caption(f"I don't know how to perform {intent_id}.")
+                    self.handle_failure(f"I don't know how to perform {intent_id}.")
 
             elif result.get("type") == "answer":
                 answer_text = result.get("text", "")

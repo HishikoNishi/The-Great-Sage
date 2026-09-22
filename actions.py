@@ -14,7 +14,7 @@ class ActionExecutor:
         self.app_shortcuts = {
             "explorer": "explorer.exe",
             "vscode": "code",
-            "browser": "chrome", # Assuming chrome, could be dynamic
+            "browser": "brave",
             "music": "spotify",  # Example
         }
 
@@ -32,8 +32,20 @@ class ActionExecutor:
             logger.warning(f"Action {action_name} is not whitelisted.")
             return False
 
-    def _open_app(self, app_name: str) -> bool:
-        """Open an application by name."""
+    def _open_app(self, app_name: str = None, url: str = None) -> bool:
+        """Open an application by name or a URL in the default browser."""
+        if url:
+            try:
+                os.startfile(url)
+                return True
+            except Exception as e:
+                logger.error(f"Failed to open URL {url}: {e}")
+                return False
+
+        if not app_name:
+            logger.warning("_open_app called without app_name or url")
+            return False
+
         app_path = self.app_shortcuts.get(app_name, app_name)
         try:
             # Use startfile on Windows to handle shortcuts/exe
