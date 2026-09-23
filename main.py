@@ -125,9 +125,15 @@ class GreatSageApp:
                     action_params = intent_cfg.get('params', {})
                     action_params.update(params)
 
-                    action_ok = executor.execute(action_name, action_params)
-                    if not action_ok:
-                        self.handle_failure("That action could not be completed.")
+                    try:
+                        action_ok = executor.execute(action_name, action_params)
+                        if not action_ok:
+                            self.handle_failure("That action could not be completed.")
+                            self.reset_to_standby()
+                            return
+                    except Exception as e:
+                        logger.exception(f"Exception during action execution: {e}")
+                        self.handle_failure("An error occurred while performing that action.")
                         self.reset_to_standby()
                         return
 
@@ -159,6 +165,8 @@ class GreatSageApp:
                 else:
                     logger.warning(f"Intent {intent_id} not found in registry.")
                     self.handle_failure(f"I don't know how to perform {intent_id}.")
+                    self.reset_to_standby()
+                    return
 
             elif result.get("type") == "answer":
                 answer_text = result.get("text", "")
@@ -212,11 +220,7 @@ class GreatSageApp:
 
         except Exception as e:
             logger.exception(f"Error in listen loop: {e}")
-            try:
-                overlay.trigger_failure()
-            except Exception:
-                pass
-            overlay.set_caption("An unexpected error occurred.")
+            self.handle_failure("An unexpected error occurred.")
 
         finally:
             total_duration = time.time() - start_total
@@ -272,7 +276,7 @@ class GreatSageApp:
         """Launches all components. webview.start() MUST be on the main thread."""
         logger.info("Starting Great Sage Assistant...")
 
-        # 1. Start Tray in background thread
+        # 1. Start Tray in background
         self.tray.start()
 
         # 2. Create overlay window (does not start the event loop yet)

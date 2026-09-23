@@ -19,7 +19,7 @@ FISH_VOICE_ID = os.getenv("FISH_VOICE_ID", "")
 FISH_MODEL = os.getenv("FISH_MODEL", "")
 
 # Application Settings
-HOTKEY = os.getenv("HOTKEY", "ctrl+alt+s")
+HOTKEY = os.getenv("HOTKEY", "alt+1")
 INTENTS_FILE = BASE_DIR / os.getenv("INTENTS_FILE", "intents.yaml")
 AUDIO_DIR = BASE_DIR / os.getenv("AUDIO_DIR", "voice_lines")
 SFX_DIR = BASE_DIR / os.getenv("SFX_DIR", "assets/sfx")
