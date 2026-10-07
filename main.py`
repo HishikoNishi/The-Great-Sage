@@ -71,8 +71,6 @@ class GreatSageApp:
             return
 
         if not self.is_listening:
-            # Show the overlay when called
-            overlay.window.show()
             # Start listening in a separate thread to avoid blocking the trigger
             threading.Thread(target=self.listen_loop, daemon=True).start()
 
@@ -274,28 +272,11 @@ class GreatSageApp:
                         else:
                             logger.error(f"Audio file missing for intent {intent_id}: {audio_path}")
                             overlay.set_caption(f"Audio missing: {voice_file}")
-                else:
-                    # This could be a generic 'open_app' intent from the brain
-                    # if the brain is just returning open_app without a registry mapping
-                    if intent_id == "open_app":
-                        # The action executor already handles the open_app logic via _open_app
-                        # try to execute directly
-                        try:
-                            ok = executor.execute("open_app", params)
-                            if not ok:
-                                self.handle_failure("That action could not be completed.")
-                                self.reset_to_standby()
-                                return
-                        except Exception as e:
-                            logger.exception(f"Exception during app execution: {e}")
-                        self.handle_failure("An error occurred while performing that action.")
-                        self.reset_to_standby()
-                        return
-                    else:
-                        logger.warning(f"Intent {intent_id} not found in registry.")
-                        self.handle_failure(f"I don't know how to perform {intent_id}.")
-                        self.reset_to_standby()
-                        return
+                elif intent_id != "open_app":
+                    logger.warning(f"Intent {intent_id} not found in registry.")
+                    self.handle_failure(f"I don't know how to perform {intent_id}.")
+                    self.reset_to_standby()
+                    return
 
             elif result.get("type") == "answer":
                 answer_text = result.get("text", "")
@@ -363,8 +344,6 @@ class GreatSageApp:
         overlay.set_mode('standby')
         overlay.set_caption("")
         self.is_listening = False
-        # Hide the overlay when returning to standby
-        overlay.window.hide()
 
     def setup_hotkey(self):
         """Sets up the global hotkey trigger."""

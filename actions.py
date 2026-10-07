@@ -1,7 +1,7 @@
 import os
 import subprocess
 import pyautogui
-from typing import Any, Dict
+from typing import Any, Dict, Union
 import logging
 
 logger = logging.getLogger("great_sage.actions")
@@ -10,13 +10,11 @@ class ActionExecutor:
     """Executes whitelisted keyboard and mouse actions."""
 
     def __init__(self):
-        # Pre-defined app paths or shortcuts could go here
-        self.app_shortcuts = {
-            "explorer": "explorer.exe",
-            "vscode": "code",
-            "browser": "brave",
-            "music": "spotify",  # Example
-        }
+        # Pre-defined app paths or shortcuts are now in app_registry.json and handled by AppResolver
+        from resolver import resolver, ClarificationRequired
+        self.resolver = resolver
+        self.ClarificationRequired = ClarificationRequired
+
 
     def execute(self, action_name: str, params: Dict[str, Any]) -> bool:
         """Dispatch to the correct whitelisted action."""
@@ -46,13 +44,31 @@ class ActionExecutor:
             logger.warning("_open_app called without app_name or url")
             return False
 
-        app_path = self.app_shortcuts.get(app_name, app_name)
-        try:
-            # Use startfile on Windows to handle shortcuts/exe
-            os.startfile(app_path)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to open app {app_name}: {e}")
+        # Use the resolver to get the resolved app NAME (the key in the registry)
+        resolution = self.resolver.resolve(app_name)
+
+        if isinstance(resolution, str):
+            # resolution is the KEY (e.g. "Riot Client")
+            # Look up the actual executable path in the registry
+            app_data = self.resolver.registry.get(resolution)
+            if app_data and isinstance(app_data, dict) and "path" in app_data:
+                app_path = app_data["path"]
+                try:
+                    os.startfile(app_path)
+                    return True
+                except Exception as e:
+                    logger.error(f"Failed to start app {resolution} at path {app_path}: {e}")
+                    return False
+            else:
+                logger.error(f"Resolved name {resolution} not found in registry or missing path.")
+                return False
+        elif isinstance(resolution, self.ClarificationRequired):
+            # Ambiguity detected: return False to trigger clarification flow in main.py
+            logger.info(f"Clarification required for app {app_name}")
+            return "CLARIFICATION_REQUIRED"
+        else:
+            # Not found (None)
+            logger.warning(f"App {app_name} could not be resolved")
             return False
 
     def _type_text(self, text: str) -> bool:

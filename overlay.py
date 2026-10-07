@@ -1,7 +1,9 @@
 import webview
 import os
 import logging
+import threading
 from pathlib import Path
+from screeninfo import get_monitors
 from config import OVERLAY_FILE
 
 try:
@@ -33,7 +35,7 @@ class OverlayManager:
         self._js_queue: list[tuple[str, str | None]] = []
 
     def start(self):
-        """Creates the borderless, transparent overlay window (loop not started yet)."""
+        """Creates the borderless overlay window."""
         overlay_path = Path(OVERLAY_FILE).resolve()
         if not overlay_path.is_file():
             logger.error(f"Overlay file not found at {overlay_path}")
@@ -42,15 +44,27 @@ class OverlayManager:
         self._page_ready = False
         self._js_queue.clear()
 
+        # Window geometry: Full screen, edge-to-edge.
+        try:
+            monitor = get_monitors()[0]
+            screen_w = monitor.width
+            screen_h = monitor.height
+        except Exception as e:
+            logger.warning(f"Failed to get screen dimensions: {e}. Using fallback 1920x1080.")
+            screen_w, screen_h = 1920, 1080
+
         self.window = webview.create_window(
             "Great Sage Core",
             url=overlay_path.as_uri(),
             frameless=True,
-            transparent=True,
-            on_top=True,
-            width=800,
-            height=600,
+            transparent=True, # Enabled for background transparency and blur
+            on_top=False,
+            width=screen_w,
+            height=screen_h,
+            x=0,
+            y=0,
             resizable=False,
+            hidden=True,
         )
         self.window.events.loaded += self._on_window_loaded
 
@@ -73,6 +87,16 @@ class OverlayManager:
     def run(self, on_ready=None):
         """Starts the webview event loop (blocks on main thread)."""
         self._pending_ready_callback = on_ready
+
+        # Workaround for Windows transparency issues:
+        # Start hidden, then show after the loop initializes.
+        def show_window():
+            import time
+            time.sleep(0.5)
+            if self.window:
+                self.window.show()
+
+        threading.Thread(target=show_window, daemon=True).start()
         webview.start(debug=True)
 
     def _evaluate_js(

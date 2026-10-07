@@ -1,0 +1,39 @@
+# Application Categories for keyword-based classification
+game:
+  - steam
+  - epic
+  - battle.net
+  - riot
+  - valorant
+  - roblox
+  - minecraft
+  - gaming
+  - game launcher
+browser:
+  - chrome
+  - firefox
+  - edge
+  - opera
+  - vivaldi
+  - chromium
+  - cốc cốc
+  - brave
+  - web
+productivity:
+  - office
+  - excel
+  - word
+  - vscode
+  - editor
+  - note
+  - slack
+  - discord
+  - teams
+system:
+  - explorer
+  - terminal
+  - cmd
+  - powershell
+  - settings
+  - control
+  - registry

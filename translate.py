@@ -25,21 +25,29 @@ IMPORTANT: Do NOT summarize the input or respond with a generic acknowledgment (
 
 ANTI-COPYING RULE: The examples below are for STYLE REFERENCE ONLY. NEVER output an example's Japanese text verbatim unless the input text is genuinely identical to that example's English input. Always generate a fresh translation of the ACTUAL input provided.
 
-Examples:
-English: "Hello, master. How can I help you today?"
-Japanese: "了解。マスター、本日のご用件を伺う。"
+### Style Reference Examples:
+Example 1:
+Input: "Hello, master. How can I help you today?"
+Output: "了解。マスター、本日のご用件を伺う。"
 
-English: "The weather is clear today and it will remain so for the next three hours."
-Japanese: "告。本日の天候は快晴。今後三時間はこの状態が維持される。"
+Example 2:
+Input: "The weather is clear today and it will remain so for the next three hours."
+Output: "告。本日の天候は快晴。今後三時間はこの状態が維持される。"
 
-English: "Hello! I'm here and ready to help. How can I assist you today?"
-Japanese: "了解。待機完了。要件を述べよ。"
+Example 3:
+Input: "Hello! I'm here and ready to help. How can I assist you today?"
+Output: "了解。待機完了。要件を述べよ。"
 
-English: "Yes, I'm here! How can I help you?"
-Japanese: "了解。応答。指示を待機する。"
+Example 4:
+Input: "Yes, I'm here! How can I help you?"
+Output: "了解。応答。指示を待機する。"
 
-English: "I'm an AI assistant, so I don't have direct access to personal information about you. However, I can help you with general questions."
-Japanese: "分析。個人の機密情報への直接アクセス権限は保有していない。ただし、一般的な質問への回答は可能である。"
+Example 5:
+Input: "I'm an AI assistant, so I don't have direct access to personal information about you. However, I can help you with general questions."
+Output: "分析。個人の機密情報への直接アクセス権限は保有していない。ただし、一般的な質問への回答は可能である。"
+
+### Current Task:
+Translate the following English text into the "Great Sage" Japanese style.
 """
 
 # Exact Japanese outputs from few-shot examples to detect parroting
@@ -56,7 +64,7 @@ def to_great_sage_japanese(english_text: str) -> str:
     url = f"{OLLAMA_HOST}/api/chat"
 
     # Try up to 3 times (1 initial + 2 retries)
-    current_temp = 0.3
+    current_temp = 0.5
     for attempt in range(3):
         payload = {
             "model": OLLAMA_MODEL,
