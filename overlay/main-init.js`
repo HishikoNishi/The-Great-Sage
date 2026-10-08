@@ -28,22 +28,31 @@ function initOverlayLifecycle() {
   // 4. Initial Mode
   window.setMode('standby');
 
-  // 5. Greeting Sequence with specific voice line
+  // 5. Greeting Sequence
+  // Wait for boot animations to settle, then say hello
   setTimeout(() => {
     window.setMode('speaking');
-    window.setCaption("Greetings. I am the Great Sage. How may I assist you today?");
+    window.setCaption("Greetings. I am the Great Sage. I am now listening for your command.");
 
-    // Play the specific greeting voice line
-    // Path assumes the file is in assets/voice_lines/ relative to the HTML
-    window.playVoiceLine('../assets/voice_lines/Great Sage - hello.mp3', 'greeting_hello');
+    // Signal the backend to start listening immediately
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage("START_LISTENING_NOW");
+    }
 
-    // Return to standby after the greeting finishes (approx 5 seconds)
+    // Transition to listening mode after the greeting text is read
     setTimeout(() => {
-      window.setMode('standby');
-      setTimeout(() => {
-        window.setCaption("");
-      }, 3000);
-    }, 5000);
+      window.setMode('listening');
+    }, 3500);
+
+    // Return to standby after a while if no one speaks
+    setTimeout(() => {
+      if (window.currentMode === 'listening') {
+        window.setMode('standby');
+        setTimeout(() => {
+          window.setCaption("");
+        }, 3000);
+      }
+    }, 8000);
   }, 2000);
 
   console.log("Overlay lifecycle started.");
