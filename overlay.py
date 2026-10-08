@@ -13,7 +13,6 @@ except ImportError:
 
 logger = logging.getLogger("great_sage.overlay")
 
-
 def _format_javascript_exception(exc: Exception) -> str:
     """Extract name/message/stack from pywebview's JavascriptException payload."""
     payload = exc.args[0] if exc.args else None
@@ -24,7 +23,6 @@ def _format_javascript_exception(exc: Exception) -> str:
         return f"{name}: {message} | stack: {stack} | full: {payload}"
     return repr(exc)
 
-
 class OverlayManager:
     """Manages the pywebview window for the Great Sage visual core."""
 
@@ -33,6 +31,45 @@ class OverlayManager:
         self._page_ready = False
         self._pending_ready_callback = None
         self._js_queue: list[tuple[str, str | None]] = []
+
+    def _configure_native_transparency(self):
+        """
+        Configures the native WinForms Form to allow true per-pixel transparency.
+        This bypasses the default opaque background of the System.Windows.Forms.Form.
+        """
+        try:
+            # Access the native WinForms Form object
+            native = self.window.native
+            if not native:
+                logger.warning("Native object not available yet.")
+                return
+
+            form = native.form
+            if not form:
+                logger.warning("Native form not available.")
+                return
+
+            # Import Color from System.Drawing via clr (pywebview already does this)
+            from System.Drawing import Color
+
+            # 1. Enable native transparency support
+            # This is the key flag that allows the form to be transparent/layered
+            form.AllowTransparency = True
+
+            # 2. Set the form background to transparent
+            form.BackColor = Color.Transparent
+
+            logger.info("=== NATIVE TRANSPARENCY CONFIGURED ===")
+            logger.info(f"native type: {type(native)}")
+            logger.info(f"form type: {type(form)}")
+            logger.info(f"form handle: {form.Handle}")
+            logger.info(f"AllowTransparency: {form.AllowTransparency}")
+            logger.info(f"BackColor: {form.BackColor}")
+            logger.info(f"FormBorderStyle: {form.FormBorderStyle}")
+            logger.info(f"window.transparent: {self.window.transparent}")
+
+        except Exception as e:
+            logger.error(f"Failed to configure native transparency: {e}")
 
     def start(self):
         """Creates the borderless overlay window."""
@@ -44,7 +81,6 @@ class OverlayManager:
         self._page_ready = False
         self._js_queue.clear()
 
-        # Window geometry: Full screen, edge-to-edge.
         try:
             monitor = get_monitors()[0]
             screen_w = monitor.width
@@ -57,8 +93,8 @@ class OverlayManager:
             "Great Sage Core",
             url=overlay_path.as_uri(),
             frameless=True,
-            transparent=True, # Enabled for background transparency and blur
-            on_top=False,
+            transparent=True,
+            on_top=True,
             width=screen_w,
             height=screen_h,
             x=0,
@@ -88,12 +124,13 @@ class OverlayManager:
         """Starts the webview event loop (blocks on main thread)."""
         self._pending_ready_callback = on_ready
 
-        # Workaround for Windows transparency issues:
-        # Start hidden, then show after the loop initializes.
         def show_window():
             import time
             time.sleep(0.5)
             if self.window:
+                # Apply native Form configuration before showing the window
+                # to prevent the initial flash of the opaque background.
+                self._configure_native_transparency()
                 self.window.show()
 
         threading.Thread(target=show_window, daemon=True).start()
@@ -165,6 +202,6 @@ class OverlayManager:
         """One-shot failure animation in the overlay."""
         self._evaluate_js("window.triggerFailure && window.triggerFailure()")
 
-
 # Singleton instance
-overlay = OverlayManager()
+from wpf_overlay_adapter import WpfOverlayAdapter
+overlay = WpfOverlayAdapter()

@@ -5,7 +5,7 @@
 <title>ANALYTICAL ENGINE // CORE</title>
 <style>
   :root{
-    --bg:rgba(18, 18, 24, 0.4);
+    --bg:rgba(18, 18, 24, 0.6);
     --cyan:#ffffff;
     --cyan-dim:#5a5a5a;
     --amber:#e6e6e6;
@@ -14,7 +14,7 @@
   }
   *{box-sizing:border-box;}
   html,body{
-    margin:0;height:100%;background:transparent;
+    margin:0;height:100%;background:transparent !important;
     font-family:'Courier New',monospace;
     color:var(--text);
     overflow:hidden;
@@ -23,11 +23,32 @@
     position:relative;width:100%;height:100%;
     display:flex;flex-direction:column;align-items:center;justify-content:center;
     opacity:0;
-    transition:opacity 0.5s ease-out;
-    background:var(--bg);
-    backdrop-filter: blur(15px);
+    transition:opacity 0.4s ease-out, transform 0.4s ease-out;
+    transform: scale(0.94);
+    background:transparent !important;
+    pointer-events: none;
   }
-  #wrap.window-visible{opacity:1;}
+  #wrap.window-visible{
+    opacity:1;
+    transform: scale(1);
+    pointer-events: auto;
+  }
+
+  /* The Floating Glass Island */
+  .glass-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-radius: 40px;
+    border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 0 40px rgba(0,0,0,0.5);
+    padding: 20px;
+  }
+
   canvas{display:block;}
   #status{
     position:absolute;top:18px;left:18px;
@@ -93,10 +114,12 @@
   }
 </style>
 </head>
-<body>
+<body style="background: transparent !important;">
 <div id="wrap">
-  <div id="status">GREAT&nbsp;SAGE&nbsp;— <b id="mode">STANDBY</b><br>AMPLITUDE&nbsp;<span id="amp">0.00</span></div>
-  <canvas id="c"></canvas>
+  <div class="glass-container">
+    <div id="status">GREAT&nbsp;SAGE&nbsp;— <b id="mode">STANDBY</b><br>AMPLITUDE&nbsp;<span id="amp">0.00</span></div>
+    <canvas id="c"></canvas>
+  </div>
   <div id="transcript"></div>
   <audio id="sage-audio" crossorigin="anonymous" style="display:none;"></audio>
   <audio id="sfx-startup" preload="auto" style="display:none;"></audio>

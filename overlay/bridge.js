@@ -1,6 +1,16 @@
 // bridge.js
 // Interface between Python (pywebview) and JavaScript
 
+window.setVisibility = function(visible) {
+  const wrap = document.getElementById('wrap');
+  if (!wrap) return;
+  if (visible) {
+    wrap.classList.add('window-visible');
+  } else {
+    wrap.classList.remove('window-visible');
+  }
+};
+
 window.setMode = function(mode) {
   const modeEl = document.getElementById('mode');
   if (!modeEl) return;
@@ -49,11 +59,40 @@ window.setCaption = function(text) {
   trans.textContent = text;
 };
 
-window.playVoiceLine = function(url) {
+window.playVoiceLine = function(url, audioId) {
   const audio = document.getElementById('sage-audio');
   if (!audio) return;
+
+  // 1. Register handlers BEFORE assigning src and calling play()
+  audio.onplay = () => {
+    console.log(`Audio playback started. ID: ${audioId}`);
+  };
+
+  audio.onended = () => {
+    console.log(`[AUDIO_TRACE] JS onended id=${audioId}`);
+    console.log(`[AUDIO_TRACE] JS postMessage AUDIO_ENDED:${audioId}`);
+    console.log(`Audio playback ended. ID: ${audioId}`);
+    // Report event with ID to WPF Host via WebView2 bridge
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage(`AUDIO_ENDED:${audioId}`);
+    } else {
+      console.warn("WebView2 bridge not available");
+    }
+  };
+
+  audio.onerror = (e) => {
+    console.error(`[AUDIO_TRACE] JS onerror id=${audioId}:`, e);
+    console.error(`Audio playback error for ID ${audioId}:`, e);
+    if (window.chrome && window.chrome.webview) {
+      window.chrome.webview.postMessage(`AUDIO_ERROR:${audioId}`);
+    }
+  };
+
+  // 2. Assign source
   audio.src = url;
-  audio.play().catch(e => console.error("Audio playback failed:", e));
+
+  // 3. Play
+  audio.play().catch(e => console.error(`Audio playback failed for ID ${audioId}:`, e));
 };
 
 window.playUiSfx = function(key) {

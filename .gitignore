@@ -427,3 +427,9 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Project Specific Rules
+__pycache__/
+*.pyc
+great_sage.log
+*.WebView2/

@@ -2,6 +2,8 @@ import threading
 import time
 import logging
 import os
+import sys
+import atexit
 from pynput import keyboard
 from config import HOTKEY, LOG_FILE
 from stt import stt
@@ -22,6 +24,30 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger("great_sage.main")
+
+def global_exception_handler(exctype, value, traceback):
+    import traceback as tb
+    logger.error("[PROCESS_TRACE] UNCAUGHT EXCEPTION")
+    logger.error("".join(tb.format_exception(exctype, value, traceback)))
+
+sys.excepthook = global_exception_handler
+
+def thread_exception_handler(args):
+    import traceback as tb
+    logger.error("[PROCESS_TRACE] UNCAUGHT THREAD EXCEPTION")
+    logger.error(f"Thread: {args.thread.name} (ID={args.thread.ident})")
+    logger.error(f"Exception: {args.exc_type.__name__}: {args.exc_value}")
+    logger.error("".join(tb.format_exception(args.exc_type, args.exc_value, args.exc_traceback)))
+
+threading.excepthook = thread_exception_handler
+
+def on_exit():
+    logger.info("[PROCESS_TRACE] atexit handler executed")
+
+atexit.register(on_exit)
+
+logger.info(f"[PROCESS_TRACE] main.py started, pid={os.getpid()}")
+logger.info(f"[PROCESS_TRACE] main thread={threading.current_thread().name} (ID={threading.get_ident()})")
 
 class GreatSageApp:
     def __init__(self):
@@ -45,25 +71,55 @@ class GreatSageApp:
     def handle_failure(self, error_msg: str):
         """Consistent failure feedback: visual glitch + spoken Japanese response."""
         logger.info(f"Handling failure: {error_msg}")
+        overlay.show()
         try:
             overlay.trigger_failure()
         except Exception:
             pass
-
+        
+        logger.info("[UI_TRACE] failure: before set_mode")
+        overlay.set_mode('speaking')
+        logger.info("[UI_TRACE] failure: after set_mode")
+        
+        logger.info("[UI_TRACE] failure: before set_caption")
         overlay.set_caption(error_msg)
-
+        logger.info(f"[UI_TRACE] failure: after set_caption (text={error_msg})")
+        
         # Attempt spoken feedback
         try:
             from translate import to_great_sage_japanese
             from tts import synthesize_great_sage_voice
-
+            
             failure_text = "I was unable to complete that action."
             japanese_text = to_great_sage_japanese(failure_text)
             audio_path = synthesize_great_sage_voice(japanese_text)
-            overlay.play_voice_line(str(audio_path))
+            
+            # Synchronize failure audio
+            current_gen_id = time.time()
+            logger.info(f"[UI_TRACE] failure: generated ID {current_gen_id}")
+            event = overlay.register_audio_event(str(current_gen_id))
+            logger.info("[UI_TRACE] failure: registered audio event")
+            
+            logger.info("[UI_TRACE] failure: before play_voice_line")
+            overlay.play_voice_line(str(audio_path), str(current_gen_id))
+            logger.info(f"[UI_TRACE] failure: play_voice_line called with ID {current_gen_id}")
+            
+            logger.info(f"[UI_TRACE] failure: waiting for AUDIO_ENDED id={current_gen_id}")
+            completed = event.wait(timeout=30)
+            
+            if completed:
+                logger.info(f"[UI_TRACE] failure: AUDIO_ENDED received id={current_gen_id}")
+                logger.info("[UI_TRACE] failure: before hide")
+                overlay.hide()
+                logger.info("[UI_TRACE] failure: after hide")
+            else:
+                logger.error(f"[UI_TRACE] failure: audio event timeout for ID {current_gen_id}")
+            
+            overlay.clear_audio_event(str(current_gen_id))
+            logger.info("[UI_TRACE] failure: cleared audio event")
+            
         except Exception as e:
-            logger.error(f"Failure voice pipeline failed: {e}")
-
+            logger.exception(f"Failure voice pipeline failed: {e}")
     def trigger_listen(self):
         """Triggered by hotkey or tray menu."""
         if self.is_paused:
@@ -71,8 +127,6 @@ class GreatSageApp:
             return
 
         if not self.is_listening:
-            # Show the overlay when called
-            overlay.window.show()
             # Start listening in a separate thread to avoid blocking the trigger
             threading.Thread(target=self.listen_loop, daemon=True).start()
 
@@ -86,8 +140,12 @@ class GreatSageApp:
         """The core pipeline: STT -> Brain -> Action -> Feedback."""
         start_total = time.time()
         self.is_listening = True
+        overlay.show() # Core should appear when we start listening
         overlay.set_mode('listening')
         overlay.set_caption("Listening...")
+
+        # Generation ID to prevent stale AUDIO_ENDED events from hiding new interactions
+        current_gen_id = time.time()
 
         try:
             # 1. STT
@@ -187,15 +245,34 @@ class GreatSageApp:
                             overlay.set_mode('speaking')
                             # Dynamic confirmation voice line
                             conf_text = f"Opening {query}."
-                            overlay.set_caption(conf_text)
                             try:
                                 from translate import to_great_sage_japanese
                                 from tts import synthesize_great_sage_voice
                                 jp_conf = to_great_sage_japanese(conf_text)
                                 audio_path = synthesize_great_sage_voice(jp_conf)
-                                overlay.play_voice_line(str(audio_path))
+
+                                overlay.set_caption(conf_text)
+
+                                # WAIT FOR AUDIO_ENDED
+                                event = overlay.register_audio_event(str(current_gen_id))
+                                if hasattr(overlay, '_event_listener_thread') and overlay._event_listener_thread:
+                                    logger.info(f"[AUDIO_TRACE] listener_alive={overlay._event_listener_thread.is_alive()}")
+                                else:
+                                    logger.info(f"[AUDIO_TRACE] listener_alive=UNKNOWN")
+                                overlay.play_voice_line(str(audio_path), str(current_gen_id))
+                                completed = event.wait(timeout=30)
+                                if not completed:
+                                    logger.error("Audio event timeout for confirmation voice.")
+                                    # FAILURE PATH: hide and stop
+                                    overlay.hide()
+                                    overlay.clear_audio_event(str(current_gen_id))
+                                    return
+
+                                overlay.clear_audio_event(str(current_gen_id))
+                                overlay.hide()
                             except Exception:
                                 logger.exception("Dynamic confirmation voice pipeline failed")
+                                overlay.hide()
                             return # SUCCESS: prevent fall-through to legacy logic
                         else:
                             self.handle_failure("I couldn't launch the application.")
@@ -213,16 +290,31 @@ class GreatSageApp:
 
                         # Speak clarification question
                         question_text = f"I found several matches: {', '.join(candidates)}. Please say the exact name."
-                        overlay.set_caption(question_text)
 
                         try:
                             from translate import to_great_sage_japanese
                             from tts import synthesize_great_sage_voice
                             japanese_text = to_great_sage_japanese(question_text)
                             audio_path = synthesize_great_sage_voice(japanese_text)
+
+                            overlay.set_caption(japanese_text)
                             overlay.play_voice_line(str(audio_path))
+
+                            # WAIT FOR AUDIO_ENDED
+                            event = overlay.register_audio_event(str(current_gen_id))
+                            logger.info(f"[AUDIO_TRACE] wait begin id={str(current_gen_id)}")
+                            overlay.play_voice_line(str(audio_path), str(current_gen_id))
+                            completed = event.wait(timeout=30)
+                            if not completed:
+                                logger.error("Audio event timeout for clarification voice.")
+                                overlay.hide()
+                                overlay.clear_audio_event(str(current_gen_id))
+                                return
+                            overlay.clear_audio_event(str(current_gen_id))
+                            overlay.hide()
                         except Exception as e:
                             logger.error(f"Clarification voice pipeline failed: {e}")
+                            overlay.hide()
 
                         # Set pending state
                         self.pending_candidates = candidates
@@ -268,34 +360,31 @@ class GreatSageApp:
                                 play_start = time.time()
                                 overlay.play_voice_line(audio_path)
                                 logger.info(f"[TIMING] Overlay playback trigger: {time.time() - play_start:.2f}s")
+
+                                # WAIT FOR AUDIO_ENDED
+                                event = overlay.register_audio_event(str(current_gen_id))
+                                logger.info(f"[AUDIO_TRACE] wait begin id={str(current_gen_id)}")
+                                overlay.play_voice_line(audio_path, str(current_gen_id))
+                                completed = event.wait(timeout=30)
+                                if not completed:
+                                    logger.error("Audio event timeout for intent voice.")
+                                    overlay.hide()
+                                    overlay.clear_audio_event(str(current_gen_id))
+                                    return
+                                overlay.clear_audio_event(str(current_gen_id))
+                                overlay.hide()
                             except Exception as e:
                                 logger.error(f"Overlay playback failed: {e}, falling back to local play_audio")
                                 play_audio(audio_path)
+                                overlay.hide()
                         else:
                             logger.error(f"Audio file missing for intent {intent_id}: {audio_path}")
                             overlay.set_caption(f"Audio missing: {voice_file}")
-                else:
-                    # This could be a generic 'open_app' intent from the brain
-                    # if the brain is just returning open_app without a registry mapping
-                    if intent_id == "open_app":
-                        # The action executor already handles the open_app logic via _open_app
-                        # try to execute directly
-                        try:
-                            ok = executor.execute("open_app", params)
-                            if not ok:
-                                self.handle_failure("That action could not be completed.")
-                                self.reset_to_standby()
-                                return
-                        except Exception as e:
-                            logger.exception(f"Exception during app execution: {e}")
-                        self.handle_failure("An error occurred while performing that action.")
-                        self.reset_to_standby()
-                        return
-                    else:
-                        logger.warning(f"Intent {intent_id} not found in registry.")
-                        self.handle_failure(f"I don't know how to perform {intent_id}.")
-                        self.reset_to_standby()
-                        return
+                elif intent_id != "open_app":
+                    logger.warning(f"Intent {intent_id} not found in registry.")
+                    self.handle_failure(f"I don't know how to perform {intent_id}.")
+                    self.reset_to_standby()
+                    return
 
             elif result.get("type") == "answer":
                 answer_text = result.get("text", "")
@@ -307,7 +396,8 @@ class GreatSageApp:
                 except Exception:
                     pass
 
-                overlay.set_caption(answer_text)
+                # IMPORTANT: Do NOT set_caption(answer_text) here to prevent English flash.
+                # Only set caption AFTER translation and synthesis are ready.
 
                 try:
                     from translate import to_great_sage_japanese
@@ -325,29 +415,40 @@ class GreatSageApp:
                     tts_duration = time.time() - tts_start
                     logger.info(f"[TIMING] Fish Audio TTS request: {tts_duration:.2f}s")
 
-                    file_size = os.path.getsize(audio_path)
-                    logger.info(f"TTS synthesized successfully: {audio_path} ({file_size} bytes")
-                    # Fixed parentheses here
                     audio_path = str(audio_path)
 
-                    # 3. Playback
+                    # 3. Playback: Caption first, then Voice
+                    overlay.set_mode('speaking')
+                    overlay.set_caption(answer_text)
+
                     play_start = time.time()
                     overlay.play_voice_line(audio_path)
                     logger.info(f"[TIMING] Overlay playback trigger: {time.time() - play_start:.2f}s")
+
                     try:
                         overlay.trigger_success()
                     except Exception:
                         pass
 
+                    # 4. WAIT FOR AUDIO_ENDED
+                    audio_event = overlay.register_audio_event(str(current_gen_id))
+                    overlay.play_voice_line(audio_path, str(current_gen_id))
+
+                    completed = audio_event.wait(timeout=30)
+
+                    if not completed:
+                        logger.error("Audio playback timeout or error reported by overlay.")
+                        overlay.hide()
+                        overlay.clear_audio_event(str(current_gen_id))
+                        # Trigger failure feedback for the user
+                        self.handle_failure("I couldn't finish speaking.")
+                    else:
+                        overlay.clear_audio_event(str(current_gen_id))
+                        overlay.hide()
+
                 except Exception as e:
                     logger.error(f"Dynamic voice pipeline failed: {e}")
-                try:
-                    overlay.trigger_failure()
-                except Exception:
-                    pass
-                time.sleep(3)
-
-                time.sleep(3)
+                    self.handle_failure("I couldn't synthesize a response.")
 
         except Exception as e:
             logger.exception(f"Error in listen loop: {e}")
@@ -363,8 +464,6 @@ class GreatSageApp:
         overlay.set_mode('standby')
         overlay.set_caption("")
         self.is_listening = False
-        # Hide the overlay when returning to standby
-        overlay.window.hide()
 
     def setup_hotkey(self):
         """Sets up the global hotkey trigger."""
@@ -407,6 +506,7 @@ class GreatSageApp:
 
     def run(self):
         """Launches all components. webview.start()MUST be on the main thread."""
+        logger.info("[PROCESS_TRACE] before GreatSageApp.run()")
         logger.info("Starting Great Sage Assistant...")
 
         # 1. Start Tray in background
@@ -417,6 +517,8 @@ class GreatSageApp:
 
         # 3. Block on main thread; on_ready runs when webview can start evaluate_js
         overlay.run(on_ready=self.on_overlay_ready)
+        logger.info("[SHUTDOWN_TRACE] overlay.run() returned")
+        logger.info("[PROCESS_TRACE] after GreatSageApp.run()")
 
     def quit_app(self):
         logger.info("Quitting Great Sage...")
