@@ -54,9 +54,18 @@ window.setMode = function(mode) {
 };
 
 window.setCaption = function(text) {
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.postMessage("CAPTION_TRACE:JS_ENTER:" + String(text));
+  }
   const trans = document.getElementById('transcript');
-  if (!trans) return;
+  if (!trans) {
+    console.error("[BRIDGE_DEBUG] #transcript element not found!");
+    return;
+  }
   trans.textContent = text;
+  if (window.chrome && window.chrome.webview) {
+    window.chrome.webview.postMessage("CAPTION_TRACE:JS_DOM_UPDATED:" + String(trans.textContent));
+  }
 };
 
 window.playVoiceLine = function(url, audioId) {

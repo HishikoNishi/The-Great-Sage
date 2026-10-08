@@ -57,7 +57,7 @@
     display:none;
   }
   #status b{color:var(--cyan);}
-  #transcript{
+  #transcript {
     position:absolute;
     bottom: 50%;
     left: 0;
@@ -76,12 +76,9 @@
     z-index: 10;
     transition:opacity .22s ease;
     pointer-events: none;
-  }
-  #transcript:empty {
-    opacity: 0;
+    opacity: 0.9;
   }
   #transcript:not(:empty){
-    opacity: 0.9;
     animation:caption-in .28s ease-out both;
   }
   @keyframes caption-in{

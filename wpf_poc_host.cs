@@ -47,6 +47,12 @@ namespace WpfHostPOC
                         string message = args.TryGetWebMessageAsString();
                         if (message == null) return;
 
+                        if (message.StartsWith("CAPTION_TRACE:")) {
+                            string traceMsg = $"[AUDIO_TRACE] {message}";
+                            try { File.AppendAllText(@"D:\Project\The-Great-Sage\wpf_audio_trace.log", traceMsg + Environment.NewLine); } catch {}
+                            return;
+                        }
+
                         string traceMsg = $"[AUDIO_TRACE] WPF WebMessageReceived: {message}";
                         Console.WriteLine(traceMsg);
                         try { File.AppendAllText(@"D:\Project\The-Great-Sage\wpf_audio_trace.log", traceMsg + Environment.NewLine); } catch {}
@@ -75,7 +81,23 @@ namespace WpfHostPOC
                             {
                                 win.Dispatcher.Invoke(() => {
                                     try {
-                                        wv.ExecuteScriptAsync(script);
+                                        if (script != null && script.Contains("window.setCaption")) {
+                                            string traceReceive = $"[AUDIO_TRACE] WPF received caption command: {script}";
+                                            Console.WriteLine(traceReceive);
+                                            try { File.AppendAllText(@"D:\Project\The-Great-Sage\wpf_audio_trace.log", traceReceive + Environment.NewLine); } catch {}
+
+                                            string traceCall = "[AUDIO_TRACE] WPF calling ExecuteScriptAsync for caption";
+                                            Console.WriteLine(traceCall);
+                                            try { File.AppendAllText(@"D:\Project\The-Great-Sage\wpf_audio_trace.log", traceCall + Environment.NewLine); } catch {}
+                                        }
+                                        wv.ExecuteScriptAsync(script).ContinueWith(t => {
+                                            if (script != null && script.Contains("window.setCaption")) {
+                                                string status = t.IsFaulted ? $"ERROR: {t.Exception?.InnerException?.Message}" : "returned";
+                                                string traceRet = $"[AUDIO_TRACE] WPF ExecuteScriptAsync caption {status}";
+                                                Console.WriteLine(traceRet);
+                                                try { File.AppendAllText(@"D:\Project\The-Great-Sage\wpf_audio_trace.log", traceRet + Environment.NewLine); } catch {}
+                                            }
+                                        });
                                     } catch (Exception ex) {
                                         Console.WriteLine("JS Error: " + ex.Message);
                                     }

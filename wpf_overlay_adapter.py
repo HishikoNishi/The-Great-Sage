@@ -113,7 +113,6 @@ class WpfOverlayAdapter:
                 logger.info("[AUDIO_TRACE] Python listener thread started - entering loop")
                 while not self._stop_event_listener.is_set():
                     try:
-                        logger.info("[AUDIO_TRACE] Python listener waiting in accept()")
                         client, addr = s.accept()
                         logger.info(f"[AUDIO_TRACE] Python listener accepted connection from {addr}")
                         with client:
@@ -201,6 +200,9 @@ class WpfOverlayAdapter:
             logger.warning(f"WPF Host not ready. Dropping command: {script}")
             return
 
+        if "window.setCaption" in script:
+            logger.info(f"[CAPTION_TRACE] Python sending: {script}")
+
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.settimeout(1.0)
@@ -214,7 +216,8 @@ class WpfOverlayAdapter:
         self._send_js(f"window.setMode('{safe_mode}')", f"set_mode('{mode}')")
 
     def set_caption(self, text: str):
-        safe_text = text.replace("'", "\'").replace("\n", "\n").replace("\r", "")
+        logger.info(f"[CAPTION_TRACE] Python set_caption: {text}")
+        safe_text = text.replace("'", "\\'").replace("\n", "\\n").replace("\r", "")
         self._send_js(f"window.setCaption('{safe_text}')", "set_caption")
 
     def play_voice_line(self, file_url: str, audio_id: str = None):

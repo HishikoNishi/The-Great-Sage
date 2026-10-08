@@ -72,18 +72,21 @@ class GreatSageApp:
         """Consistent failure feedback: visual glitch + spoken Japanese response."""
         logger.info(f"Handling failure: {error_msg}")
         overlay.show()
-        try:
-            overlay.trigger_failure()
-        except Exception:
-            pass
-        
+        time.sleep(0.1)
         logger.info("[UI_TRACE] failure: before set_mode")
         overlay.set_mode('speaking')
         logger.info("[UI_TRACE] failure: after set_mode")
-        
+
         logger.info("[UI_TRACE] failure: before set_caption")
         overlay.set_caption(error_msg)
         logger.info(f"[UI_TRACE] failure: after set_caption (text={error_msg})")
+
+        try:
+            overlay.trigger_failure()
+            # Force caption again in case trigger_failure resets the DOM or state
+            overlay.set_caption(error_msg)
+        except Exception:
+            pass
         
         # Attempt spoken feedback
         try:
@@ -156,7 +159,6 @@ class GreatSageApp:
             if not text:
                 logger.info("No speech detected.")
                 logger.info(f"[TIMING] STT recording: {stt_duration:.2f}s")
-                self.reset_to_standby()
                 return
 
             logger.info(f"User said: {text}")
@@ -204,7 +206,6 @@ class GreatSageApp:
                         brain_duration = time.time() - brain_start
                         if not result:
                             self.handle_failure("I couldn't tell which one you meant.")
-                            self.reset_to_standby()
                             return
             else:
                 # Normal Brain Classification
@@ -276,7 +277,6 @@ class GreatSageApp:
                             return # SUCCESS: prevent fall-through to legacy logic
                         else:
                             self.handle_failure("I couldn't launch the application.")
-                            self.reset_to_standby()
                             return
                     elif isinstance(resolution, (type(None))):
                         # Not found
@@ -333,7 +333,6 @@ class GreatSageApp:
                         action_ok = executor.execute(action_name, action_params)
                         if not action_ok:
                             self.handle_failure("That action could not be completed.")
-                            self.reset_to_standby()
                             return
                     except Exception:
                         logger.exception(f"Exception during action execution for intent {intent_id}")
@@ -388,6 +387,8 @@ class GreatSageApp:
 
             elif result.get("type") == "answer":
                 answer_text = result.get("text", "")
+                overlay.set_mode('speaking')
+                overlay.set_caption(answer_text)
 
                 # Defensive re-confirmation that we are still in thinking mode
                 # during translation and synthesis stages.
